@@ -104,7 +104,7 @@ Most tests need the retail ROM and are skipped without it. To run them:
 
 ## License
 
-Copyright (C) 2026 Theanine3D
+Copyright (C) 2026 Pedro Valencia Oseguera
 
 RE2 Studio is free software, licensed under the [GNU General Public License v3.0](LICENSE). Third-party components and their licenses are listed in [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
 
