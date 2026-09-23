@@ -1,6 +1,6 @@
 # RE2 Studio
 
-A romhacking suite for **Resident Evil 2 on the Nintendo 64**. It comes as a desktop editor for Windows and Linux (RE2 Studio) and a command-line tool (`re2`). Together they read every asset in the game, let you edit and replace them, and rebuild a ROM that boots.
+A romhacking suite for **Resident Evil 2 on the Nintendo 64**. It comes as a desktop editor for Windows and Linux (RE2 Studio) and a command-line tool (`re2`), both capable of editing graphics, text, and sounds.
 
 This repository contains **no game data**. You need your own dump of the game: *Resident Evil 2 (USA)* or *Resident Evil 2 (USA) (Rev 1)*, as a `.z64`, `.v64` or `.n64` file.
 
