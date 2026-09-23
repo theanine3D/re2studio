@@ -102,6 +102,12 @@ Most tests need the retail ROM and are skipped without it. To run them:
 
 [`docs/RE2-N64-Format-Specification.md`](docs/RE2-N64-Format-Specification.md) documents how the game stores and encodes everything above: containers, compression, models, animation, audio codecs, text and lookup tables. It is written for anyone building their own tools.
 
+## Previews
+<img style="width:50%" alt="image" src="https://github.com/user-attachments/assets/75b4d28f-6ae4-444f-a618-e92e792c46cd" /><img style="width:50%" alt="image" src="https://github.com/user-attachments/assets/716e4160-952a-433f-ab1d-d15c9d576ac5" />
+<img style="width:50%" alt="image" src="https://github.com/user-attachments/assets/b71a6226-255a-4b69-892f-1979ee0bf16e" /><img style="width:50%" alt="image" src="https://github.com/user-attachments/assets/11ef6293-e5f0-41c3-8b67-8b094984cea4" />
+
+
+
 ## License
 
 Copyright (C) 2026 Pedro Valencia Oseguera
