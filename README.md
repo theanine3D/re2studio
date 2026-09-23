@@ -1,4 +1,5 @@
 # RE2 Studio
+<img width="1268" height="581" alt="image" src="https://github.com/user-attachments/assets/e51c062e-273c-4159-bd52-77609f0e57e4" />
 
 A romhacking suite for **Resident Evil 2 on the Nintendo 64**. It comes as a desktop editor for Windows and Linux (RE2 Studio) and a command-line tool (`re2`), both capable of editing graphics, text, and sounds.
 
