@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -902,7 +902,7 @@ public sealed class ModelBrowserPanel
         ImGui.TextDisabled("Model import brings the file's textures with it, matched to slots by " +
                            "their tex00, tex01 ... material names -- \nrename one and its image is " +
                            "skipped. Textures of the wrong size are resized to the slot's own, and " +
-                           "re-quantised to its palette. Geometry keeps\n the part count and " +
+                           "re-quantised to its palette. Geometry keeps\nthe part count and " +
                            "texture slots. Moving bones in edit mode is carried over too -- the " +
                            "skeleton is rewritten and the geometry\nmeasured against its new joints. " +
                            "Animation import " +
