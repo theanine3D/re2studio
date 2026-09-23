@@ -95,7 +95,6 @@ Most tests need the retail ROM and are skipped without it. To run them:
 | `Re2.Studio/` | The editor (Silk.NET + Dear ImGui) |
 | `Re2.Cli/` | The `re2` command-line tool, including diagnostics |
 | `Re2.Tests/` | xUnit tests |
-| `docs/RE2-N64-Format-Specification.md` | Full specification of the game's data formats, including the differences between Rev 0 and Rev 1 |
 | `ghidra/RE2_Import.py` | Ghidra script that loads the ROM with its overlays decompressed and mapped |
 | `make-icon.py` | Regenerates `Re2.Studio/app.ico` from `icon.png` |
 
