@@ -1,0 +1,21 @@
+# Build output
+bin/
+obj/
+dist/
+dist-linux/
+*.user
+.vs/
+
+# ROMs and anything built from them -- never commit game data
+*.z64
+*.v64
+*.n64
+*.bps
+*.ips
+
+# Runtime and local files
+imgui.ini
+labels.json
+fg.txt
+*.7z
+*.odt

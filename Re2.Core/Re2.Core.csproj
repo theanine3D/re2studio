@@ -1,0 +1,16 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Published builds ship no symbol files; they are noise beside a double-clickable exe. -->
+    <DebugType Condition="'$(Configuration)' == 'Release'">none</DebugType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SharpGLTF.Toolkit" Version="1.0.5" />
+    <PackageReference Include="SixLabors.ImageSharp" Version="2.1.11" />
+  </ItemGroup>
+
+</Project>

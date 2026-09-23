@@ -1,0 +1,55 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Re2.Core\Re2.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Silk.NET.Input" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.OpenGL" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.OpenGL.Extensions.ImGui" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Windowing" Version="2.23.0" />
+    <!-- Referenced explicitly so the GLFW backends can be registered by hand for single-file. -->
+    <PackageReference Include="Silk.NET.Windowing.Glfw" Version="2.23.0" />
+    <PackageReference Include="Silk.NET.Input.Glfw" Version="2.23.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <!--
+      WinExe rather than Exe: double-clicking must not flash up a console window. The headless
+      switches still print, because Main reattaches to the launching terminal when there is one.
+    -->
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AssemblyName>RE2 Studio</AssemblyName>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <!--
+    Publish settings for the double-clickable build. Self-contained so it runs on a machine with no
+    .NET installed, and single-file so what ships is one icon rather than a folder of DLLs the user
+    has to look through for the right one.
+
+    IncludeNativeLibrariesForSelfExtract matters here: Silk.NET carries native GLFW and OpenGL
+    loaders, and without it those are left beside the executable and the single file is a fiction.
+  -->
+  <PropertyGroup>
+    <!-- Builds for whichever OS it is built on; pass -r to cross-compile. -->
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows'))">win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Linux'))">linux-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <!-- Extracts the native GLFW and cimgui libraries where the loaders can actually find them. -->
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <DebugType>none</DebugType>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <!-- Trimming is off: ImGui and Silk.NET reach for types reflectively and a trimmed build crashes. -->
+    <PublishTrimmed>false</PublishTrimmed>
+  </PropertyGroup>
+
+</Project>

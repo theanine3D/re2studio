@@ -1,0 +1,135 @@
+using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
+using Re2.Core.Formats;
+using Re2.Core.Rom;
+
+namespace Re2.Core.Assets;
+
+/// <summary>The inventory item names -- "Green Herb", "F.</summary>
+public static class ItemNames
+{
+    /// <summary>Where the names begin. Rev 1 addresses; <see cref="ModelTextureTable.Overlay.At"/> moves them.</summary>
+    public const uint NamesAddress = 0x800FACB0;
+
+    /// <summary>The offset table, which also marks the end of the names.</summary>
+    public const uint TableAddress = 0x800FB3F8;
+
+    /// <summary>Where the table ends, and the message text after it begins.</summary>
+    public const uint TableEndAddress = 0x800FB530;
+
+    public const int Count = (int)((TableEndAddress - TableAddress) / 2);
+
+    /// <summary>Bytes available for the names, separators and all.</summary>
+    public const int Capacity = (int)(TableAddress - NamesAddress);
+
+    public static List<string> Read(RomFile rom) => Read(ModelTextureTable.LoadMainOverlay(rom));
+
+    public static List<string> Read(ModelTextureTable.Overlay overlay)
+    {
+        var names = new List<string>(Count);
+
+        uint table = overlay.At(TableAddress);
+        uint names0 = overlay.At(NamesAddress);
+
+        for (int i = 0; i < Count; i++)
+        {
+            int offset = overlay.U16(table + (uint)i * 2);
+            int at = (int)(names0 - overlay.BaseAddress) + offset;
+
+            int end = at;
+            while (end < overlay.Data.Length && overlay.Data[end] != ItemText.NameSeparator) end++;
+
+            names.Add(ItemText.Decode(overlay.Data.AsSpan(at, end - at)));
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// How many of the available bytes a set of names would occupy, or -1 if one of them cannot be
+    /// written.
+    /// </summary>
+    public static int Measure(IReadOnlyList<string> names)
+        => Layout(names, out var bytes, out _, out _) ? bytes.Count : -1;
+
+    /// <summary>Lays the names out and builds the table that indexes them.</summary>
+    public static bool TryBuild(IReadOnlyList<string> names, out byte[] block, out byte[] table,
+                                out string error)
+    {
+        block = Array.Empty<byte>();
+        table = Array.Empty<byte>();
+
+        if (!Layout(names, out var bytes, out var offsets, out error)) return false;
+
+        if (bytes.Count > Capacity)
+        {
+            error = $"The names need {bytes.Count:N0} bytes but only {Capacity:N0} are available, " +
+                    $"{bytes.Count - Capacity:N0} too many. Shorten some of them.";
+            return false;
+        }
+
+        // The rest of the block is cleared rather than left holding whatever was there before, so
+        // a shorter set of names cannot leave the tail of a longer one lying around.
+        var padded = new byte[Capacity];
+        bytes.CopyTo(padded);
+
+        var indexed = new byte[Count * 2];
+        for (int i = 0; i < Count; i++)
+            BinaryPrimitives.WriteUInt16BigEndian(indexed.AsSpan(i * 2, 2), (ushort)offsets[i]);
+
+        block = padded;
+        table = indexed;
+        return true;
+    }
+
+    /// <summary>
+    /// Runs the names together with their separators and records where each one landed, without yet
+    /// caring whether the result fits.
+    /// </summary>
+    private static bool Layout(IReadOnlyList<string> names, out List<byte> bytes, out int[] offsets,
+                               out string error)
+    {
+        bytes = new List<byte> { ItemText.NameSeparator };
+        offsets = new int[Count];
+        error = "";
+
+        if (names.Count != Count)
+        {
+            error = $"There must be exactly {Count} names; {names.Count} were given.";
+            return false;
+        }
+
+        var already = new Dictionary<string, int>(StringComparer.Ordinal);
+
+        for (int i = 0; i < Count; i++)
+        {
+            string name = names[i];
+
+            // The empty name is the separator the block already opens with.
+            if (name.Length == 0) { offsets[i] = 0; continue; }
+
+            if (already.TryGetValue(name, out int shared)) { offsets[i] = shared; continue; }
+
+            if (!ItemText.TryEncode(name, out var codes, out error)) return false;
+
+            offsets[i] = bytes.Count;
+            bytes.AddRange(codes);
+            bytes.Add(ItemText.NameSeparator);
+            already[name] = offsets[i];
+        }
+
+        return true;
+    }
+
+    /// <summary>Writes a set of names into a decompressed overlay image in place.</summary>
+    public static bool TryWrite(ModelTextureTable.Overlay overlay, IReadOnlyList<string> names,
+                                out string error)
+    {
+        if (!TryBuild(names, out var block, out var table, out error)) return false;
+
+        block.CopyTo(overlay.Data, (int)(overlay.At(NamesAddress) - overlay.BaseAddress));
+        table.CopyTo(overlay.Data, (int)(overlay.At(TableAddress) - overlay.BaseAddress));
+        return true;
+    }
+}
