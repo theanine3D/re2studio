@@ -101,7 +101,7 @@ Most tests need the retail ROM and are skipped without it. To run them:
 
 ## Documentation
 
-[RE2 N64 Format Specification]([docs/RE2-N64-Format-Specification.md](https://github.com/theanine3D/re2studio/wiki/Resident-Evil-2-(Nintendo-64)-%E2%80%94-Data-Format-Specification)) documents how the game stores and encodes everything above: containers, compression, models, animation, audio codecs, text and lookup tables. It is written for anyone building their own tools.
+[RE2 N64 Format Specification](https://github.com/theanine3D/re2studio/wiki/Resident-Evil-2-(Nintendo-64)-%E2%80%94-Data-Format-Specification) documents how the game stores and encodes everything above: containers, compression, models, animation, audio codecs, text and lookup tables. It is written for anyone building their own tools.
 
 ## Previews
 <img style="width:50%" alt="image" src="https://github.com/user-attachments/assets/75b4d28f-6ae4-444f-a618-e92e792c46cd" /><img style="width:50%" alt="image" src="https://github.com/user-attachments/assets/716e4160-952a-433f-ab1d-d15c9d576ac5" />
