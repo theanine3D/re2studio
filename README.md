@@ -12,7 +12,7 @@ This repository contains **no game data**. You need your own dump of the game, a
 | *Resident Evil 2 (Europe) (En,Fr)* | Item names and item text editable in **English or French**; French documents keep their accents |
 | *Biohazard 2 (Japan)* | Item names and item text editable in **English or Japanese** (kana and kanji); documents edited as images |
 
-The editor detects the release automatically and shows it in the window title. For Europe and Japan, a **language** selector on the Text tab's *Item names* and *Item text* pages switches between the English text and the release's second language. Japan opens on Japanese, the language its players see.
+The editor detects the release automatically and shows it in the window title. For Europe and Japan, a **language** selector on the Text tab's *Item names* and *Item text* pages switches between the English text and the release's second language.
 
 ## What it can do
 
