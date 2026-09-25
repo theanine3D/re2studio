@@ -14,11 +14,17 @@ public static class TextTab
     /// <summary>Opens one of the sub-tabs, for captures and for anything linking here.</summary>
     public static void Show(string sub) => _requested = sub;
 
-    public static void Draw(RomSession session)
+    public static void Draw(RomSession session, TextureCache cache)
     {
         if (!ImGui.BeginTabBar("texttabs")) return;
 
-        if (Sub(Files)) { TextPanel.Draw(session); ImGui.EndTabItem(); }
+        if (Sub(Files))
+        {
+            // Japan's documents are pictures of text, not strings.
+            if (session.Rom.Layout.DocumentPages is not null) DocumentPagePanel.Draw(session, cache);
+            else TextPanel.Draw(session);
+            ImGui.EndTabItem();
+        }
         if (Sub(Names)) { ItemNamePanel.Draw(session); ImGui.EndTabItem(); }
         if (Sub(Examine)) { ItemMessagePanel.Draw(session); ImGui.EndTabItem(); }
 

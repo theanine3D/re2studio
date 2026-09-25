@@ -125,6 +125,9 @@ public sealed class RomFile
     /// <summary>Game code as printed on the cart label, e.g. "NREE" for Resident Evil 2 (U).</summary>
     public string GameCode => Encoding.ASCII.GetString(Data, 0x3B, 4);
 
+    /// <summary>Where this build keeps the tables and assets the tool looks up.</summary>
+    public Re2Layout Layout => Re2Version.Detect(this).Layout;
+
     public CicChip Cic => N64Crc.DetectCic(Data);
 
     public uint ReadU32(int offset) => BinaryPrimitives.ReadUInt32BigEndian(Data.AsSpan(offset, 4));

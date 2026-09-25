@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Re2.Core.Rom;
 
 namespace Re2.Core.Assets;
 
@@ -10,6 +11,7 @@ public static class InventoryIcons
 {
     public const int Width = 40, Height = 30, Size = Width * Height;
 
+    /// <summary>Rev 1 asset ids; other builds number them differently (see <see cref="Re2Layout"/>).</summary>
     public const int FirstAsset = 5336;
     public const int Count = 106;
 
@@ -23,28 +25,36 @@ public static class InventoryIcons
     /// <summary>One icon: the asset it lives in and where in that asset it starts.</summary>
     public sealed record Icon(int Number, int AssetId, int Offset, int ItemId)
     {
-        public bool InBundle => AssetId == BundleAsset;
+        public bool InBundle => Number >= Count;
 
         public override string ToString()
             => InBundle ? $"extra {Number - Count}" : $"icon {ItemId}";
     }
 
-    /// <summary>Every icon: the 106 by item, then the fourteen extras.</summary>
-    public static IReadOnlyList<Icon> All { get; } = Build();
+    /// <summary>Every icon in Rev 1: the 106 by item, then the fourteen extras.</summary>
+    public static IReadOnlyList<Icon> All { get; } = Build(Re2Layout.UsaRev1);
 
-    private static List<Icon> Build()
+    private static readonly IReadOnlyList<Icon> EuropeIcons = Build(Re2Layout.Europe);
+
+    /// <summary>Every icon, with the asset ids of the given build.</summary>
+    public static IReadOnlyList<Icon> For(Re2Layout layout)
+        => layout == Re2Layout.Europe ? EuropeIcons
+         : layout.IconFirstAsset == FirstAsset ? All : Build(layout);
+
+    private static List<Icon> Build(Re2Layout layout)
     {
         var icons = new List<Icon>(Count + BundleCount);
 
-        for (int i = 0; i < Count; i++) icons.Add(new Icon(i, FirstAsset + i, 0, i));
-        for (int i = 0; i < BundleCount; i++) icons.Add(new Icon(Count + i, BundleAsset, i * Size, -1));
+        for (int i = 0; i < Count; i++) icons.Add(new Icon(i, layout.IconFirstAsset + i, 0, i));
+        for (int i = 0; i < BundleCount; i++) icons.Add(new Icon(Count + i, layout.IconBundleAsset, i * Size, -1));
 
         return icons;
     }
 
     /// <summary>Is this asset one the icons live in?</summary>
-    public static bool IsIconAsset(int assetId)
-        => assetId == BundleAsset || (assetId >= FirstAsset && assetId < FirstAsset + Count);
+    public static bool IsIconAsset(int assetId, Re2Layout layout)
+        => assetId == layout.IconBundleAsset ||
+           (assetId >= layout.IconFirstAsset && assetId < layout.IconFirstAsset + Count);
 
     /// <summary>
     /// Checks that an asset's bytes are the size the icon needs, so a wrong or damaged asset is

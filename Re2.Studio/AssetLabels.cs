@@ -121,11 +121,44 @@ public static class AssetLabels
     private static SortedDictionary<string, string> Sorted()
         => new(_labels, StringComparer.OrdinalIgnoreCase);
 
-    private static string Key(string category, int id) => $"{category}:{id}";
+    /// <summary>The open ROM's build. Europe numbers its assets differently from the USA builds.</summary>
+    public static Re2.Core.Rom.Re2Layout Layout { get; set; } = Re2.Core.Rom.Re2Layout.UsaRev1;
+
+    /// <summary>
+    /// Labels are keyed by Rev 1's numbering, so one file serves all four releases and a label made
+    /// on one cart shows on the same asset in the others. Rev 0 numbers everything as Rev 1 does;
+    /// Europe and Japan are translated (sounds and icons are numbered alike everywhere). What has
+    /// no Rev 1 counterpart gets a key of its own region.
+    /// </summary>
+    private static string Key(string category, int id)
+    {
+        if (Layout.Rev1IdRuns is null || category is Sound or Icon) return $"{category}:{id}";
+
+        int rev1 = category switch
+        {
+            Background => Layout.ToRev1Background(id),
+            Voice => Layout.ToRev1VoiceClip(id),
+            _ => Layout.ToRev1AssetId(id),
+        };
+        return rev1 >= 0 ? $"{category}:{rev1}" : RegionKey(category, id);
+    }
+
+    private static string RegionKey(string category, int id)
+        => $"{(Layout == Re2.Core.Rom.Re2Layout.Japan ? "jp" : "eu")}-{category}:{id}";
+
+    /// <summary>
+    /// Where 1.1 kept a Europe or Japan background or voice label, before those were translated to
+    /// Rev 1's numbering: still read, and moved to the shared key the next time it is edited.
+    /// </summary>
+    private static string? LegacyKey(string category, int id)
+        => Layout.Rev1IdRuns is not null && category is Background or Voice ? RegionKey(category, id) : null;
 
     /// <summary>The label for an asset, or an empty string when it has none.</summary>
     public static string Get(string category, int id)
-        => _labels.TryGetValue(Key(category, id), out var label) ? label : "";
+    {
+        if (_labels.TryGetValue(Key(category, id), out var label)) return label;
+        return LegacyKey(category, id) is { } legacy && _labels.TryGetValue(legacy, out label) ? label : "";
+    }
 
     /// <summary>Sets or clears a label.</summary>
     public static void Set(string category, int id, string label)
@@ -133,11 +166,13 @@ public static class AssetLabels
         string key = Key(category, id);
         string trimmed = label.Trim();
 
-        bool changed;
-        if (trimmed.Length == 0) changed = _labels.Remove(key);
+        bool changed = false;
+        if (LegacyKey(category, id) is { } legacy && legacy != key) changed = _labels.Remove(legacy);
+
+        if (trimmed.Length == 0) changed |= _labels.Remove(key);
         else
         {
-            changed = !_labels.TryGetValue(key, out var existing) || existing != trimmed;
+            changed |= !_labels.TryGetValue(key, out var existing) || existing != trimmed;
             _labels[key] = trimmed;
         }
 

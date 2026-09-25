@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -136,13 +136,14 @@ public static class AssetIo
     // ---- text -------------------------------------------------------------
 
     /// <summary>Writes one edited string into its .txt in the project folder.</summary>
-    public static string SaveText(string project, int assetId, string text, int previousLength)
+    public static string SaveText(string project, int assetId, string text, int previousLength,
+                                  bool latin1 = false)
     {
         if (!HasProject(project))
             throw new FileNotFoundException("No extracted project. Use Extract on the Project tab first.");
 
         // Refuses anything the game's font has no glyph for, rather than writing mojibake.
-        var bytes = TextTable.Encode(text);
+        var bytes = TextTable.Encode(text, latin1);
 
         string file = WriteProjectAsset(project, assetId, bytes);
 
@@ -530,25 +531,39 @@ public static class AssetIo
     /// <summary>Replaces one sample in a project folder from a WAV.</summary>
     public static string ImportSound(RomSession session, string project, int sampleIndex, string wavPath)
     {
-        var bank = session.Sounds;
+        // The project's own bank files are the truth. The session's view catches up only when a
+        // background rescan finishes, so two imports in quick succession would otherwise both start
+        // from the bank before either, and the second would write the first's sample back out.
+        var layout = session.Rom.Layout;
+        var bank = ReadProjectAsset(project, layout.SampleDirectoryAsset) is { } onDiskTable &&
+                   ReadProjectAsset(project, layout.SampleDataAsset) is { } onDiskData
+            ? SoundDirectory.ReadFrom(onDiskTable, onDiskData)
+            : session.Sounds;
         var sample = bank.Samples.FirstOrDefault(s => s.Index == sampleIndex)
                      ?? throw new InvalidDataException($"Sample {sampleIndex} is not in the bank.");
 
         var cartSample = session.CartSounds.Samples.FirstOrDefault(s => s.Index == sampleIndex) ?? sample;
 
         var (pcm, rate) = WavCodec.Read(File.ReadAllBytes(wavPath));
-        var replacement = new SoundBankBuilder.Replacement(sampleIndex, pcm, rate);
+        var replacements = new List<SoundBankBuilder.Replacement> { new(sampleIndex, pcm, rate) };
+
+        // WAVs edited by hand in the project and not yet folded into the bank go in with this one.
+        // Left pending, they would make the next scan and Build rebuild the bank from the cart plus
+        // those WAVs alone, which throws away every sample brought in through Import.
+        var pending = PendingSoundWavs(project, sampleIndex);
+        replacements.AddRange(pending.Select(p => p.Replacement));
 
         // Rebuilt from what the bank holds now, so other samples keep their edits, but the rate this
         // import is brought back to comes from the cart -- otherwise replacing an already-replaced
         // sample measures itself against the previous import and keeps its rate.
         var notes = new List<string>();
-        var (table, data) = SoundBankBuilder.Rebuild(bank, new[] { replacement }, notes.Add, session.CartSounds);
+        var (table, data) = SoundBankBuilder.Rebuild(bank, replacements, notes.Add, session.CartSounds);
 
-        WriteProjectAsset(project, SoundDirectory.SampleDirectoryAssetId, table);
-        string file = WriteProjectAsset(project, SoundDirectory.SampleDataAssetId, data);
+        WriteProjectAsset(project, session.Rom.Layout.SampleDirectoryAsset, table);
+        string file = WriteProjectAsset(project, session.Rom.Layout.SampleDataAsset, data);
 
         UpdateProjectWav(project, sampleIndex, wavPath);
+        MarkSoundWavsApplied(project, pending.Select(p => p.Index));
 
         // What the bank now holds, rather than what the WAV was: the two differ whenever the audio
         // had to be resampled, and the stored rate is the one that decides how it plays.
@@ -560,7 +575,78 @@ public static class AssetIo
                $"(the ROM's own: {cartSample.Seconds:0.00}s at {cartSample.SampleRate} Hz); " +
                $"source WAV {pcm.Length:N0} samples at {rate} Hz ({seconds:0.00}s)\n" +
                string.Concat(notes.Select(n => n + "\n")) +
+               (pending.Count > 0
+                   ? $"also folded in {pending.Count} WAV(s) edited in the project folder: " +
+                     string.Join(", ", pending.Select(p => p.Index)) + "\n"
+                   : "") +
                $"wrote {file} -- now Build ROM on the Project tab";
+    }
+
+    /// <summary>Project WAVs whose contents no longer match the hash the manifest recorded.</summary>
+    private static List<(int Index, SoundBankBuilder.Replacement Replacement)> PendingSoundWavs(
+        string project, int except)
+    {
+        var result = new List<(int, SoundBankBuilder.Replacement)>();
+        try
+        {
+            var manifest = JsonSerializer.Deserialize<ProjectManifest>(
+                SharedFile.ReadAllText(Path.Combine(project, ProjectFolder.ManifestName)));
+            if (manifest is null) return result;
+
+            foreach (var sample in manifest.SoundSamples)
+            {
+                if (sample.Index == except) continue;
+                string path = Path.Combine(project, sample.File.Replace('/', Path.DirectorySeparatorChar));
+                if (!File.Exists(path)) continue;
+
+                byte[] wav = SharedFile.ReadAllBytes(path);
+                if (System.Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(wav)) == sample.Sha256)
+                    continue;
+
+                try
+                {
+                    var (pcm, rate) = WavCodec.Read(wav);
+                    result.Add((sample.Index, new SoundBankBuilder.Replacement(sample.Index, pcm, rate)));
+                }
+                catch (Exception)
+                {
+                    // Unreadable: Build leaves it out too, so it is not an edit to carry.
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or JsonException)
+        {
+            // No manifest to compare against: nothing counts as pending.
+        }
+        return result;
+    }
+
+    /// <summary>Re-records the WAV hashes of samples that are now in the bank.</summary>
+    private static void MarkSoundWavsApplied(string project, IEnumerable<int> indices)
+    {
+        var set = indices.ToHashSet();
+        if (set.Count == 0) return;
+        try
+        {
+            string manifestPath = Path.Combine(project, ProjectFolder.ManifestName);
+            var manifest = JsonSerializer.Deserialize<ProjectManifest>(SharedFile.ReadAllText(manifestPath));
+            if (manifest is null) return;
+
+            foreach (var sample in manifest.SoundSamples.Where(x => set.Contains(x.Index)))
+            {
+                string path = Path.Combine(project, sample.File.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(path))
+                    sample.Sha256 = System.Convert.ToHexString(
+                        System.Security.Cryptography.SHA256.HashData(SharedFile.ReadAllBytes(path)));
+            }
+
+            File.WriteAllText(manifestPath,
+                JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));
+        }
+        catch (Exception)
+        {
+            // The bank already holds them; a stale hash only means the next Build folds them again.
+        }
     }
 
     /// <summary>
@@ -630,7 +716,7 @@ public static class AssetIo
         var rebuilt = VoiceBank.ReplaceInPlace(session.VoiceBankData, clip, replacement,
                                                (c, from, to) => MortCodec.PadWithSilence(session.VoiceCpu, c, from, to));
 
-        string file = WriteProjectAsset(project, VoiceBank.AssetId, rebuilt);
+        string file = WriteProjectAsset(project, session.Rom.Layout.VoiceBankAsset, rebuilt);
 
         double seconds = blocks * (double)VoiceClip.SamplesPerBlock / Math.Max(1, rate);
         string padding = blocks < clip.BlockCount
@@ -670,7 +756,7 @@ public static class AssetIo
         var rebuilt = VoiceBank.ReplaceInPlace(session.VoiceBankData, clip, encoded,
                                                (c, from, to) => MortCodec.PadWithSilence(session.VoiceCpu, c, from, to));
 
-        string file = WriteProjectAsset(project, VoiceBank.AssetId, rebuilt);
+        string file = WriteProjectAsset(project, session.Rom.Layout.VoiceBankAsset, rebuilt);
 
         return $"clip {clip.Index} replaced with {Path.GetFileName(path)}" + Environment.NewLine +
                resampled + note +
@@ -790,7 +876,7 @@ public static class AssetIo
     /// Writes a character out as glTF, with its textures, and its skeleton and clips when it has them.
     /// </summary>
     public static string ExportCharacterGltf(RomSession session, ModelEntry character, string folder,
-                                             bool withAnimation)
+                                             bool withAnimation, bool withRig = false)
     {
         var mesh = session.LoadMesh(character.MeshAssetId)
                    ?? throw new InvalidDataException($"Asset {character.MeshAssetId} is not a model.");
@@ -801,7 +887,8 @@ public static class AssetIo
         var textures = CollectTextures(session, character);
         bool usable = textures.Any(t => t.Png.Length > 0);
 
-        PoseBank? bank = withAnimation ? session.LoadPoseBank(character) : null;
+        // withRig keeps the skeleton and skin without the clips.
+        PoseBank? bank = withAnimation || withRig ? session.LoadPoseBank(character) : null;
         AnimationSet? clips = withAnimation ? session.LoadAnimations(character) : null;
 
         if (bank is not null)
@@ -818,14 +905,14 @@ public static class AssetIo
     }
 
     public static string ExportCharacters(RomSession session, IEnumerable<ModelEntry> characters,
-                                          string folder, bool withAnimation)
+                                          string folder, bool withAnimation, bool withRig = false)
     {
         int written = 0, failed = 0;
         string? last = null;
 
         foreach (var character in characters)
         {
-            try { last = ExportCharacterGltf(session, character, folder, withAnimation); written++; }
+            try { last = ExportCharacterGltf(session, character, folder, withAnimation, withRig); written++; }
             catch (Exception) { failed++; }
         }
 
@@ -1119,7 +1206,7 @@ public static class AssetIo
 
         string note = $"reverted {blob.File} to the ROM ({original.Length:N0} bytes)";
 
-        if (assetId == SoundDirectory.SampleDataAssetId || assetId == SoundDirectory.SampleDirectoryAssetId)
+        if (assetId == session.Rom.Layout.SampleDataAsset || assetId == session.Rom.Layout.SampleDirectoryAsset)
         {
             int restored = ProjectFolder.RestoreSoundSamples(session.Rom, project, manifest);
             if (restored > 0)
@@ -1255,11 +1342,11 @@ public static class AssetIo
     /// </summary>
     public static byte[] IconPalette(RomSession session)
     {
-        if (!session.TryGetAsset(InventoryIcons.PaletteAsset, out var data) ||
+        if (!session.TryGetAsset(session.Rom.Layout.IconPaletteAsset, out var data) ||
             !MenuImage.TryParse(data, out var screen) ||
             screen!.Palettes.Count <= InventoryIcons.PaletteIndex)
             throw new InvalidDataException(
-                $"Menu screen {InventoryIcons.PaletteAsset}, whose palette the icons use, could not be read.");
+                $"Menu screen {session.Rom.Layout.IconPaletteAsset}, whose palette the icons use, could not be read.");
 
         return screen.PaletteToRgba(InventoryIcons.PaletteIndex);
     }
@@ -1290,7 +1377,7 @@ public static class AssetIo
         Directory.CreateDirectory(folder);
 
         int written = 0;
-        foreach (var icon in InventoryIcons.All)
+        foreach (var icon in InventoryIcons.For(session.Rom.Layout))
         {
             var rgba = IconRgba(session, icon, palette);
             if (rgba is null) continue;
@@ -1341,11 +1428,108 @@ public static class AssetIo
         string file = WriteProjectAsset(project, icon.AssetId, InventoryIcons.Replace(asset, icon, pixels));
 
         return $"{icon}: colours matched into palette {InventoryIcons.PaletteIndex} of menu screen " +
-               $"{InventoryIcons.PaletteAsset}" +
+               $"{session.Rom.Layout.IconPaletteAsset}" +
                (approximated == 0
                    ? " -- every pixel exact"
                    : $" -- {approximated} of {InventoryIcons.Size} pixels took the nearest colour") +
                $"\nwrote {file} -- now Build ROM on the Project tab";
+    }
+
+    // ---- Japan's document pages -------------------------------------------------------------
+
+    /// <summary>A document page as it currently reads (project edit applied), or null.</summary>
+    public static JapaneseDocument? DocumentPage(RomSession session, int assetId)
+        => session.TryGetAsset(assetId, out var data) && JapaneseDocument.TryDecode(data, out var page) ? page : null;
+
+    /// <summary>RGBA for a page: the four levels as greys on black, which is how the game draws them.</summary>
+    public static byte[] DocumentRgba(JapaneseDocument page)
+    {
+        var grey = page.ToGrey();
+        var rgba = new byte[grey.Length * 4];
+        for (int i = 0; i < grey.Length; i++)
+        {
+            rgba[i * 4] = rgba[i * 4 + 1] = rgba[i * 4 + 2] = grey[i];
+            rgba[i * 4 + 3] = 255;
+        }
+        return rgba;
+    }
+
+    public static string ExportDocumentPng(RomSession session, int assetId, string folder)
+    {
+        var page = DocumentPage(session, assetId)
+                   ?? throw new InvalidDataException($"Asset {assetId} is not a document page.");
+        Directory.CreateDirectory(folder);
+        string path = Path.Combine(folder, $"page{assetId}.png");
+        File.WriteAllBytes(path, ImageCodec.RgbaToPng(DocumentRgba(page), page.Width, page.Height));
+        return path;
+    }
+
+    public static string ExportDocuments(RomSession session, IEnumerable<int> assetIds, string folder)
+    {
+        int written = 0;
+        foreach (int id in assetIds)
+            if (DocumentPage(session, id) is not null) { ExportDocumentPng(session, id, folder); written++; }
+        return $"wrote {written:N0} pages to {folder}";
+    }
+
+    /// <summary>
+    /// Replaces a page from a PNG of the same size. The page has four levels, so every pixel's
+    /// brightness is rounded to the nearest of black, dark grey, light grey and white.
+    /// </summary>
+    public static string ImportDocumentPng(RomSession session, string project, int assetId, string pngPath)
+    {
+        var original = DocumentPage(session, assetId)
+                       ?? throw new InvalidDataException($"Asset {assetId} is not a document page.");
+
+        using var loaded = Image.Load<Rgba32>(pngPath);
+        if (loaded.Width != original.Width || loaded.Height != original.Height)
+            throw new InvalidDataException(
+                $"The image is {loaded.Width}x{loaded.Height}, but this page is {original.Width}x{original.Height}.");
+
+        var grey = new byte[loaded.Width * loaded.Height];
+        loaded.ProcessPixelRows(rows =>
+        {
+            for (int y = 0; y < rows.Height; y++)
+            {
+                var row = rows.GetRowSpan(y);
+                for (int x = 0; x < row.Length; x++)
+                {
+                    var p = row[x];
+                    // Rec. 601 luma, with transparency read as the black page behind it.
+                    int luma = (p.R * 299 + p.G * 587 + p.B * 114) / 1000;
+                    grey[y * row.Length + x] = (byte)(luma * p.A / 255);
+                }
+            }
+        });
+
+        var page = JapaneseDocument.FromGrey(original.Width, original.Height, grey);
+        if (page.Pixels.AsSpan().SequenceEqual(original.Pixels))
+            return $"page {assetId}: identical to what is there -- nothing written";
+
+        var encoded = page.Encode();
+        string file = WriteProjectAsset(project, assetId, encoded);
+        return $"page {assetId}: {encoded.Length:N0} bytes coded\nwrote {file} -- now Build ROM on the Project tab";
+    }
+
+    /// <summary>An asset's bytes as the project folder holds them now, or null if it has none.</summary>
+    private static byte[]? ReadProjectAsset(string project, int assetId)
+    {
+        try
+        {
+            string manifestPath = Path.Combine(project, ProjectFolder.ManifestName);
+            if (!File.Exists(manifestPath)) return null;
+
+            var manifest = JsonSerializer.Deserialize<ProjectManifest>(SharedFile.ReadAllText(manifestPath));
+            var blob = manifest?.Blobs.FirstOrDefault(b => b.Ids.Contains(assetId));
+            if (blob is null) return null;
+
+            string path = Path.Combine(project, blob.File.Replace('/', Path.DirectorySeparatorChar));
+            return File.Exists(path) ? SharedFile.ReadAllBytes(path) : null;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            return null;
+        }
     }
 
     private static string WriteProjectAsset(string project, int assetId, byte[] bytes)

@@ -35,6 +35,13 @@ public static class ModelTextureTable
     public static readonly uint[] EntityTableAddresses = { 0x801287B0, 0x80128A10, 0x80128C70, 0x80128ED0 };
 
     public const int EntityRecordSize = 8;
+
+    /// <summary>
+    /// Records in the last entity table. The others run on into their neighbours, as the game reads
+    /// them, but the last is followed 0x170 bytes in by a table of consecutive asset ids, whose
+    /// halfwords would otherwise read as characters with nonsense meshes.
+    /// </summary>
+    public const int LastTableRecords = 0x170 / EntityRecordSize;
     public const int AssetsPerCharacter = 8;
     public const int MeshSlot = 7;
 
@@ -44,10 +51,10 @@ public static class ModelTextureTable
     private const ushort NoValue = 0xFFFF;
 
     /// <summary>Overlay 1's decompressed image plus the address it loads at.</summary>
-    public sealed record Overlay(byte[] Data, uint BaseAddress, int Delta = 0)
+    public sealed record Overlay(byte[] Data, uint BaseAddress, Re2Layout? Layout = null)
     {
         /// <summary>A Rev 1 table address, moved to where this release keeps it.</summary>
-        public uint At(uint rev1Address) => (uint)(rev1Address + Delta);
+        public uint At(uint rev1Address) => Layout?.Address(rev1Address) ?? rev1Address;
 
         public bool Contains(uint address, int length)
             => address >= BaseAddress && address - BaseAddress + (uint)length <= (uint)Data.Length;
@@ -61,7 +68,7 @@ public static class ModelTextureTable
         var main = entries.First(e => e.Index == MainOverlayIndex);
         if (!OverlayTable.TryDecompress(rom.Data, main, out var data))
             throw new InvalidOperationException("Could not decompress the main overlay.");
-        return new Overlay(data, main.LoadAddress, Re2Version.Detect(rom).MainOverlayDelta);
+        return new Overlay(data, main.LoadAddress, rom.Layout);
     }
 
     /// <summary>Reads one packed pair record.</summary>
@@ -93,6 +100,7 @@ public static class ModelTextureTable
     public static List<ModelEntry> ReadCharacters(Overlay overlay, int tableIndex = 0, int maxEntries = 128)
     {
         uint table = overlay.At(EntityTableAddresses[tableIndex]);
+        if (tableIndex == EntityTableAddresses.Length - 1) maxEntries = Math.Min(maxEntries, LastTableRecords);
         var characters = new List<ModelEntry>();
 
         for (int i = 0; i < maxEntries; i++)

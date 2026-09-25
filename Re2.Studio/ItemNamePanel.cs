@@ -37,23 +37,31 @@ public static class ItemNamePanel
     private static IReadOnlyList<string> Descriptions =>
         ItemMessagePanel.Live is { Count: > 0 } live ? live : _loadedRecords;
 
+    private static bool Fr => InventoryLanguage.Alternate;
+
+    /// <summary>True while a name has been changed and not yet saved.</summary>
+    internal static bool HasUnsavedEdits =>
+        _names is not null && _edited is not null && !_names.SequenceEqual(_edited);
+
     public static void Draw(RomSession session)
     {
+        InventoryLanguage.Draw(session);
+
         if (_names is null)
         {
             // The project file is the thing a build reads, so it is the baseline whenever it exists.
-            _names = ItemNameFile.ExistsIn(ProjectPanel.Folder) &&
-                     ItemNameFile.TryRead(ProjectPanel.Folder, out var saved, out _)
+            _names = ItemNameFile.ExistsIn(ProjectPanel.Folder, InventoryLanguage.FileSuffix) &&
+                     ItemNameFile.TryRead(ProjectPanel.Folder, out var saved, out _, InventoryLanguage.FileSuffix)
                 ? saved
-                : ItemNames.Read(session.Rom);
+                : ItemNames.Read(session.Rom, Fr);
 
             _edited = new List<string>(_names);
 
             // The descriptions, so each name can show the text that goes with it.
-            _loadedRecords = ItemTextFile.ExistsIn(ProjectPanel.Folder) &&
-                       ItemTextFile.TryRead(ProjectPanel.Folder, out var savedText, out _)
+            _loadedRecords = ItemTextFile.ExistsIn(ProjectPanel.Folder, InventoryLanguage.FileSuffix) &&
+                       ItemTextFile.TryRead(ProjectPanel.Folder, out var savedText, out _, InventoryLanguage.FileSuffix)
                 ? savedText
-                : ItemMessages.Read(session.Rom);
+                : ItemMessages.Read(session.Rom, Fr);
         }
 
         if (_pending >= 0)
@@ -65,14 +73,14 @@ public static class ItemNamePanel
 
         var names = _edited!;
 
-        int used = ItemNames.Measure(names);
+        int used = ItemNames.Measure(names, InventoryLanguage.Charset);
         bool encodable = used >= 0;
-        int spare = ItemNames.Capacity - used;
+        int spare = InventoryLanguage.NamesCapacity - used;
         int changed = names.Where((t, i) => t != _names[i]).Count();
 
         if (encodable)
         {
-            ImGui.Text($"{names.Count} items   {used:N0} of {ItemNames.Capacity:N0} bytes   " +
+            ImGui.Text($"{names.Count} items   {used:N0} of {InventoryLanguage.NamesCapacity:N0} bytes   " +
                        $"{changed} edited");
             ImGui.SameLine();
 
@@ -80,7 +88,7 @@ public static class ItemNamePanel
             else ImGui.TextColored(Red, $"({-spare:N0} over -- shorten something)");
 
             // A bar, because "235 spare" means much less than seeing how little is left.
-            ImGui.ProgressBar(Math.Clamp(used / (float)ItemNames.Capacity, 0, 1),
+            ImGui.ProgressBar(Math.Clamp(used / (float)InventoryLanguage.NamesCapacity, 0, 1),
                               new Vector2(-1, 6), "");
         }
         else
@@ -107,7 +115,7 @@ public static class ItemNamePanel
                 : changed == 0 ? "Nothing to save: these match the project."
                 : !encodable ? "One of the names cannot be written in the game's characters."
                 : spare < 0 ? "The names do not fit. Shorten some of them first."
-                : $"Writes {ItemNameFile.Name} in the project folder.");
+                : $"Writes {ItemNameFile.NameOf(InventoryLanguage.FileSuffix)} in the project folder.");
 
         ImGui.SameLine();
         ImGui.BeginDisabled(changed == 0);
@@ -133,7 +141,7 @@ public static class ItemNamePanel
                 continue;
 
             bool dirty = names[i] != _names[i];
-            int cost = ItemText.MeasureOrMinusOne(names[i]);
+            int cost = ItemText.MeasureOrMinusOne(names[i], InventoryLanguage.Charset);
 
             if (_scrollTo == i) { ImGui.SetScrollHereY(0.5f); _scrollTo = -1; }
 
@@ -172,7 +180,7 @@ public static class ItemNamePanel
 
         if (encodable)
         {
-            ImGui.Text($"{used:N0} of {ItemNames.Capacity:N0} bytes");
+            ImGui.Text($"{used:N0} of {InventoryLanguage.NamesCapacity:N0} bytes");
             if (spare >= 0) ImGui.Text($"{spare:N0} spare");
             else ImGui.TextColored(Red, $"{-spare:N0} over");
         }
@@ -189,7 +197,7 @@ public static class ItemNamePanel
         ImGui.Spacing();
 
         var longest = names
-            .Select((name, i) => (Name: name, Index: i, Cost: ItemText.MeasureOrMinusOne(name)))
+            .Select((name, i) => (Name: name, Index: i, Cost: ItemText.MeasureOrMinusOne(name, InventoryLanguage.Charset)))
             .Where(x => x.Cost > 0)
             .GroupBy(x => x.Name)
             .Select(g => (g.Key, Count: g.Count(), g.First().Cost))
@@ -202,7 +210,7 @@ public static class ItemNamePanel
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.TextDisabled("CHARACTERS");
-        ImGui.TextWrapped("A-Z, a-z, 0-9, space, and . , ! ? / ' -");
+        ImGui.TextWrapped(InventoryLanguage.Characters);
         ImGui.TextWrapped("Anything else the game has no glyph for is refused rather than " +
                           "silently dropped.");
         ImGui.Spacing();
@@ -243,12 +251,12 @@ public static class ItemNamePanel
     {
         try
         {
-            ItemNameFile.Write(ProjectPanel.Folder, _edited!);
+            ItemNameFile.Write(ProjectPanel.Folder, _edited!, InventoryLanguage.FileSuffix);
 
             // What was just written is the new baseline, so the edited count and markers change with
             // the file rather than a project rescan later.
             _names = new List<string>(_edited!);
-            _status = $"saved {ItemNameFile.Name} -- now Build ROM on the Project tab";
+            _status = $"saved {ItemNameFile.NameOf(InventoryLanguage.FileSuffix)} -- now Build ROM on the Project tab";
         }
         catch (Exception ex)
         {

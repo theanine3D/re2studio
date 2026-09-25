@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
@@ -80,9 +80,12 @@ public static class ProjectFolder
         private readonly Dictionary<int, string> _byAssetId = new();
         private readonly HashSet<int> _meshes = new();
         private readonly HashSet<int> _masks = new();
+        private readonly Re2Layout _layout;
 
         public Classifier(RomFile rom, AssetDirectory directory)
         {
+            _layout = rom.Layout;
+
             // Backgrounds: keyed by ROM offset, which is what the index reports.
             try
             {
@@ -93,11 +96,11 @@ public static class ProjectFolder
             catch (Exception) { /* an unreadable index only costs nicer names */ }
 
             // Sound: five fixed assets, named for what each one is rather than by number.
-            _byAssetId[SoundDirectory.SequenceAssetId] = "sequences";
-            _byAssetId[SoundDirectory.ProjectAssetId] = "project";
-            _byAssetId[SoundDirectory.PoolAssetId] = "pool";
-            _byAssetId[SoundDirectory.SampleDirectoryAssetId] = "sample-directory";
-            _byAssetId[SoundDirectory.SampleDataAssetId] = "sample-data";
+            _byAssetId[_layout.VoiceBankAsset] = "sequences";
+            _byAssetId[_layout.SoundProjectAsset] = "project";
+            _byAssetId[_layout.SoundPoolAsset] = "pool";
+            _byAssetId[_layout.SampleDirectoryAsset] = "sample-directory";
+            _byAssetId[_layout.SampleDataAsset] = "sample-data";
 
             // Masks: the foreground pieces each camera draws over the background.
             try
@@ -191,7 +194,7 @@ public static class ProjectFolder
                     // bank and a project's layout should not change under people -- but it is the
                     // Dialogue tab's asset, so the Overrides list says so rather than calling the
                     // whole of the game's speech "sound".
-                    string category = entry.Index == Assets.VoiceBank.AssetId ? "dialogue" : "sound";
+                    string category = entry.Index == _layout.VoiceBankAsset ? "dialogue" : "sound";
                     return new BlobName(category, "sounds", sound + ".bin");
                 }
 
@@ -211,9 +214,14 @@ public static class ProjectFolder
                 if (_text.Contains(entry.Index))
                     return new BlobName("text", "text", $"text{entry.Index}.txt");
 
+            // Japan's document pages: pictures of text, kept in their coded form.
+            foreach (var entry in entries)
+                if (_layout.IsDocumentPage(entry.Index))
+                    return new BlobName("text", "text", $"page{entry.Index}.bin");
+
             // Inventory icons: headerless, so they can only be known by where they are.
             foreach (var entry in entries)
-                if (InventoryIcons.IsIconAsset(entry.Index))
+                if (InventoryIcons.IsIconAsset(entry.Index, _layout))
                     return new BlobName("icon", "icons", $"icon{entry.Index}.bin");
 
             var bytes = decoded.ToArray();
@@ -246,6 +254,47 @@ public static class ProjectFolder
     }
 
     /// <summary>
+    /// Whether a project extracted from one release can be used with another at all. The two USA
+    /// builds share their asset numbering; Europe's and Japan's each differ throughout, so another
+    /// region's project would land its files on the wrong assets.
+    /// </summary>
+    public static bool SameNumbering(Re2Release a, Re2Release b) => Family(a) == Family(b);
+
+    private static Re2Release Family(Re2Release release)
+        => release is Re2Release.Europe or Re2Release.Japan ? release : Re2Release.UsaRev1;
+
+    private static Re2Release FamilyOfGameCode(string code) => code switch
+    {
+        "NREP" => Re2Release.Europe,
+        "NB5J" => Re2Release.Japan,
+        _ => Re2Release.UsaRev1
+    };
+
+    /// <summary>
+    /// False when the project in <paramref name="folder"/> was extracted from a release numbered
+    /// differently from <paramref name="rom"/>. A project with no readable release is given the
+    /// benefit of the doubt.
+    /// </summary>
+    public static bool FitsRom(string folder, RomFile rom)
+    {
+        try
+        {
+            var manifest = JsonSerializer.Deserialize<ProjectManifest>(
+                SharedFile.ReadAllText(Path.Combine(folder, ManifestName)));
+            if (manifest is null) return true;
+
+            var current = Re2Version.Detect(rom).Release;
+            if (Enum.TryParse<Re2Release>(manifest.Release, out var extracted) && extracted != Re2Release.Unknown)
+                return SameNumbering(extracted, current);
+
+            // Projects from before the release was recorded still name the cart's game code.
+            return manifest.GameCode is not { Length: 4 }
+                   || FamilyOfGameCode(manifest.GameCode) == Family(current);
+        }
+        catch (Exception) { return true; }
+    }
+
+    /// <summary>
     /// A warning when a project is about to be built onto a different release than it was extracted
     /// from, or null when the two agree (or the project predates the field).
     /// </summary>
@@ -257,7 +306,7 @@ public static class ProjectFolder
         var current = Re2Version.Detect(rom);
         if (current.Release == Re2Release.Unknown || current.Release == extracted) return null;
 
-        string was = extracted == Re2Release.UsaRev1 ? "USA (Rev 1)" : "USA";
+        string was = Re2Version.NameOf(extracted);
         return $"WARNING: this project was extracted from the {was} build, but the ROM open now is " +
                $"{current}. The two are not interchangeable -- extract again from this ROM, or build " +
                $"against the {was} one.";
@@ -359,6 +408,12 @@ public static class ProjectFolder
             var overlay = ModelTextureTable.LoadMainOverlay(rom);
             ItemNameFile.Write(folder, ItemNames.Read(overlay));
             ItemTextFile.Write(folder, ItemMessages.Read(overlay));
+
+            if (rom.Layout.AlternateInventoryText is { } alt)
+            {
+                ItemNameFile.Write(folder, ItemNames.Read(overlay, alternate: true), alt.FileSuffix);
+                ItemTextFile.Write(folder, ItemMessages.Read(overlay, alternate: true), alt.FileSuffix);
+            }
         }
         catch (Exception) { /* the rest of the project is still worth having */ }
     }
@@ -460,8 +515,8 @@ public static class ProjectFolder
         var bank = SoundDirectory.Read(baseRom, AssetDirectory.Read(baseRom));
         var (table, data) = SoundBankBuilder.Rebuild(bank, replacements);
 
-        result[SoundDirectory.SampleDirectoryAssetId] = table;
-        result[SoundDirectory.SampleDataAssetId] = data;
+        result[baseRom.Layout.SampleDirectoryAsset] = table;
+        result[baseRom.Layout.SampleDataAsset] = data;
         return result;
     }
 

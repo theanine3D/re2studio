@@ -47,10 +47,23 @@ public static class OverlayTable
     private const uint KernelSegment0 = 0x80000000;
     private const uint KernelSegment0Limit = 0x80800000;
 
-    /// <summary>True when the magic record is present where we expect it.</summary>
-    public static bool IsPresent(ReadOnlySpan<byte> rom)
-        => rom.Length > TableRomOffset + RecordSize
-           && Encoding.ASCII.GetString(rom.Slice(TableRomOffset, RecordSize)) == Magic;
+    /// <summary>True when the magic record is present.</summary>
+    public static bool IsPresent(ReadOnlySpan<byte> rom) => Locate(rom) >= 0;
+
+    /// <summary>
+    /// ROM offset of the table, found by its magic: 0x12CD0 in the USA builds, 0x12CB0 in Europe.
+    /// -1 when there is none.
+    /// </summary>
+    public static int Locate(ReadOnlySpan<byte> rom)
+    {
+        if (HasMagic(rom, TableRomOffset)) return TableRomOffset;
+        for (int at = 0x10000; at < 0x14420 && at + RecordSize <= rom.Length; at += RecordSize)
+            if (HasMagic(rom, at)) return at;
+        return -1;
+    }
+
+    private static bool HasMagic(ReadOnlySpan<byte> rom, int at)
+        => at + RecordSize <= rom.Length && Encoding.ASCII.GetString(rom.Slice(at, RecordSize)) == Magic;
 
     /// <summary>
     /// Reads every entry until a record whose cart address is out of range, which terminates the table.
@@ -58,11 +71,12 @@ public static class OverlayTable
     public static List<OverlayEntry> Read(ReadOnlySpan<byte> rom)
     {
         var entries = new List<OverlayEntry>();
-        if (!IsPresent(rom)) return entries;
+        int table = Locate(rom);
+        if (table < 0) return entries;
 
         for (int index = 1; ; index++)
         {
-            int at = TableRomOffset + index * RecordSize;
+            int at = table + index * RecordSize;
             if (at + RecordSize > rom.Length) break;
 
             uint cart = BinaryPrimitives.ReadUInt32BigEndian(rom.Slice(at, 4));

@@ -72,12 +72,12 @@ public static class IconPanel
 
         if (_error.Length > 0) { ImGui.TextWrapped(_error); return; }
 
-        var icons = InventoryIcons.All;
+        var icons = InventoryIcons.For(session.Rom.Layout);
 
         ImGui.Text($"{InventoryIcons.Count} item icons + {InventoryIcons.BundleCount} extras, " +
                    $"{InventoryIcons.Width}x{InventoryIcons.Height}");
         ImGui.TextDisabled($"Drawn with palette {InventoryIcons.PaletteIndex} of menu screen " +
-                           $"#{InventoryIcons.PaletteAsset}, the inventory screen they sit on.");
+                           $"#{session.Rom.Layout.IconPaletteAsset}, the inventory screen they sit on.");
 
         string filter = LabelUi.DrawFilter(AssetLabels.Icon);
         var visible = Enumerable.Range(0, icons.Count)
@@ -171,7 +171,7 @@ public static class IconPanel
             _exportStatus = PanelIo.Run(() => "wrote " + AssetIo.ExportIconPng(session, icon, _exportFolder));
 
         ImGui.SameLine();
-        if (ImGui.Button($"Export all {InventoryIcons.All.Count}"))
+        if (ImGui.Button($"Export all {InventoryIcons.For(session.Rom.Layout).Count}"))
             _exportStatus = PanelIo.Run(() => AssetIo.ExportIcons(session, _exportFolder));
 
         // The palette every icon is drawn with, which lives on the inventory screen rather than in any
@@ -179,10 +179,10 @@ public static class IconPanel
         ImGui.SameLine();
         if (ImGui.Button("Export palette"))
             _exportStatus = PanelIo.Run(() => "wrote " + AssetIo.ExportMenuPalettePng(
-                session, InventoryIcons.PaletteAsset, _exportFolder, InventoryIcons.PaletteIndex));
+                session, session.Rom.Layout.IconPaletteAsset, _exportFolder, InventoryIcons.PaletteIndex));
 
         if (ImGui.IsItemHovered())
-            ImGui.SetTooltip($"Palette {InventoryIcons.PaletteIndex} of menu screen #{InventoryIcons.PaletteAsset}, " +
+            ImGui.SetTooltip($"Palette {InventoryIcons.PaletteIndex} of menu screen #{session.Rom.Layout.IconPaletteAsset}, " +
                              "as a 256x1 strip: entry 0 is the leftmost pixel.");
 
         AssetIoUi.DrawStatus(_exportStatus);

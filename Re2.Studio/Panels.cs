@@ -864,13 +864,17 @@ public sealed class ModelBrowserPanel
 
         ImGui.SameLine();
         if (ImGui.Button("Export without animation"))
-            _exportStatus = PanelIo.Run(() => AssetIo.ExportCharacterGltf(session, _character, _exportFolder, false));
+            _exportStatus = PanelIo.Run(() => AssetIo.ExportCharacterGltf(session, _character, _exportFolder, false, withRig: true));
 
         if (selected.Count > 1)
         {
             ImGui.SameLine();
             if (ImGui.Button($"Export {selected.Count} selected"))
                 _exportStatus = PanelIo.Run(() => AssetIo.ExportCharacters(session, selected, _exportFolder, true));
+
+            ImGui.SameLine();
+            if (ImGui.Button($"Export {selected.Count} selected without animation"))
+                _exportStatus = PanelIo.Run(() => AssetIo.ExportCharacters(session, selected, _exportFolder, false, withRig: true));
         }
 
         AssetIoUi.DrawStatus(_exportStatus);
@@ -1187,7 +1191,7 @@ public static class SoundPanel
             _pendingRange = null;
         }
 
-        if (!ImGui.BeginTable("sounds", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg |
+        if (!ImGui.BeginTable("sound-list", 7, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg |
                                            ImGuiTableFlags.ScrollY | ImGuiTableFlags.Resizable |
                                            ImGuiTableFlags.Sortable)) return;
 
@@ -1201,7 +1205,14 @@ public static class SoundPanel
             // Largest first is the useful default for a size: the long samples are the dialogue.
             if (column == 3) flags |= ImGuiTableColumnFlags.PreferSortDescending;
 
-            ImGui.TableSetupColumn(SortableColumns[column], flags);
+            // The id only ever needs four digits (plus room for the sort arrow), so it is fixed at
+            // that and the space goes to the label, which is the one column with long text.
+            if (column == 0)
+                ImGui.TableSetupColumn(SortableColumns[column], flags | ImGuiTableColumnFlags.WidthFixed,
+                                       ImGui.CalcTextSize("0000").X + ImGui.GetFontSize());
+            else
+                ImGui.TableSetupColumn(SortableColumns[column], flags | ImGuiTableColumnFlags.WidthStretch,
+                                       column == 1 ? 4f : 1f);
         }
         ImGui.TableHeadersRow();
 
@@ -1720,14 +1731,25 @@ public static class ProjectPanel
     /// <summary>
     /// Picks the project folder when a ROM is opened, rather than waiting for this tab to be drawn.
     /// </summary>
-    public static void Initialise(string romPath, Settings settings)
+    public static void Initialise(string romPath, Settings settings, RomFile? rom = null)
     {
-        string beside = Path.Combine(Path.GetDirectoryName(romPath) ?? ".", "re2-project");
+        // Europe and Japan get folders of their own: their asset numbering differs from the USA builds'.
+        var release = rom is null ? Re2Release.UsaRev1 : Re2Version.Detect(rom).Release;
+        string name = release switch
+        {
+            Re2Release.Europe => "re2-project-eu",
+            Re2Release.Japan => "re2-project-jp",
+            _ => "re2-project"
+        };
+        string beside = Path.Combine(Path.GetDirectoryName(romPath) ?? ".", name);
+
+        bool Usable(string folder)
+            => AssetIo.DescribeProject(folder).Ready && (rom is null || ProjectFolder.FitsRom(folder, rom));
 
         // A remembered folder that still holds a usable extract wins; otherwise fall back to the
         // default location, which may itself already hold one from an earlier run.
         string? remembered = settings.LastProject;
-        _folder = remembered is { Length: > 0 } && AssetIo.DescribeProject(remembered).Ready
+        _folder = remembered is { Length: > 0 } && Usable(remembered)
             ? remembered
             : beside;
 
@@ -1736,7 +1758,7 @@ public static class ProjectPanel
         try { _folder = Path.GetFullPath(_folder); } catch (ArgumentException) { }
 
         // Having found one, write it down.
-        if (AssetIo.DescribeProject(_folder).Ready) settings.RememberProject(_folder);
+        if (Usable(_folder)) settings.RememberProject(_folder);
 
         _outputRom = Path.Combine(Path.GetDirectoryName(romPath) ?? ".", "re2-modified.z64");
     }
@@ -1754,9 +1776,88 @@ public static class ProjectPanel
         catch (Exception) { return null; }     // an unreadable manifest is the build's problem to report
     }
 
+    private static bool _confirmExtract;
+
+    /// <summary>Opens the overwrite question on the next draw, for a headless capture of it.</summary>
+    public static void AskBeforeExtract() => _confirmExtract = true;
+    private const string ConfirmExtractPopup = "Overwrite the project?";
+
+    /// <summary>The OK / Cancel question asked before extracting over an existing project.</summary>
+    private static void DrawExtractConfirmation(RomSession session)
+    {
+        if (_confirmExtract)
+        {
+            ImGui.OpenPopup(ConfirmExtractPopup);
+            _confirmExtract = false;
+        }
+
+        ImGui.SetNextWindowPos(ImGui.GetMainViewport().GetCenter(), ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        if (!ImGui.BeginPopupModal(ConfirmExtractPopup, ImGuiWindowFlags.AlwaysAutoResize)) return;
+
+        ImGui.Text("This folder already holds an extracted project:");
+        ImGui.TextColored(new Vector4(1f, 0.85f, 0.4f, 1f), _folder);
+        ImGui.Spacing();
+        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 36);
+        ImGui.TextWrapped("Extracting again rewrites every asset file in it with the ROM's original, so " +
+                          "ALL of your existing edits in this project folder (imported sounds, textures, " +
+                          "models, text and anything edited by hand) will be completely overwritten. " +
+                          "This cannot be undone.");
+        ImGui.PopTextWrapPos();
+        ImGui.Spacing();
+        ImGui.Text("Are you sure you want to proceed?");
+        ImGui.Spacing();
+
+        if (ImGui.Button("OK", new Vector2(120, 0)))
+        {
+            ImGui.CloseCurrentPopup();
+            StartExtract(session);
+        }
+        ImGui.SameLine();
+        bool cancel = ImGui.Button("Cancel", new Vector2(120, 0));
+
+        // Cancel is the safe default: keyboard focus starts on it, and Escape takes it too.
+        ImGui.SetItemDefaultFocus();
+        if (cancel || ImGui.IsKeyPressed(ImGuiKey.Escape))
+            ImGui.CloseCurrentPopup();
+
+        ImGui.EndPopup();
+    }
+
+    private static void StartExtract(RomSession session)
+    {
+        _log = "";
+        _done = 0; _total = 1;
+        string folder = _folder;
+        _work = Task.Run(() =>
+        {
+            try
+            {
+                // The editor scans this folder in the background to find edits, and an extract
+                // rewrites every file in it.
+                using var paused = session.Overrides.Pause();
+
+                var manifest = ProjectFolder.Extract(session.Rom, folder,
+                    (done, total) => { _done = done; _total = total; });
+
+                var kinds = string.Join("   ", manifest.Blobs
+                    .GroupBy(b => b.Kind)
+                    .OrderByDescending(g => g.Count())
+                    .Select(g => $"{g.Key} {g.Count():N0}"));
+
+                Settings.Load().RememberProject(folder);
+
+                _log = $"extracted {manifest.Blobs.Count:N0} blobs covering " +
+                       $"{manifest.Blobs.Sum(b => b.Ids.Count):N0} asset ids\n{kinds}\n" +
+                       $"{manifest.Blobs.Count(b => b.Ids.Count > 1):N0} blobs are shared by several ids\n" +
+                       $"-> {Path.GetFullPath(folder)}";
+            }
+            catch (Exception ex) { _log = "extract failed: " + ex.Message; }
+        });
+    }
+
     public static void Draw(RomSession session)
     {
-        if (_folder.Length == 0) Initialise(session.Path, new Settings());
+        if (_folder.Length == 0) Initialise(session.Path, new Settings(), session.Rom);
 
         var (ready, projectMessage) = AssetIo.DescribeProject(_folder);
 
@@ -1787,34 +1888,12 @@ public static class ProjectPanel
 
         if (ImGui.Button("Extract"))
         {
-            _log = "";
-            _done = 0; _total = 1;
-            string folder = _folder;
-            _work = Task.Run(() =>
-            {
-                try
-                {
-                    // The editor scans this folder in the background to find edits, and an extract
-                    // rewrites every file in it.
-                    using var paused = session.Overrides.Pause();
-
-                    var manifest = ProjectFolder.Extract(session.Rom, folder,
-                        (done, total) => { _done = done; _total = total; });
-
-                    var kinds = string.Join("   ", manifest.Blobs
-                        .GroupBy(b => b.Kind)
-                        .OrderByDescending(g => g.Count())
-                        .Select(g => $"{g.Key} {g.Count():N0}"));
-
-                    Settings.Load().RememberProject(folder);
-
-                    _log = $"extracted {manifest.Blobs.Count:N0} blobs covering " +
-                           $"{manifest.Blobs.Sum(b => b.Ids.Count):N0} asset ids\n{kinds}\n" +
-                           $"{manifest.Blobs.Count(b => b.Ids.Count > 1):N0} blobs are shared by several ids\n" +
-                           $"-> {Path.GetFullPath(folder)}";
-                }
-                catch (Exception ex) { _log = "extract failed: " + ex.Message; }
-            });
+            // Extracting over an earlier extract puts every file back as the cart has it, so ask
+            // first rather than silently throwing away the user's edits.
+            if (File.Exists(Path.Combine(_folder, ProjectFolder.ManifestName)))
+                _confirmExtract = true;
+            else
+                StartExtract(session);
         }
 
         ImGui.SameLine();
@@ -1925,6 +2004,8 @@ public static class ProjectPanel
         }
         ImGui.EndDisabled();
         ImGui.EndDisabled();
+
+        DrawExtractConfirmation(session);
 
         if (!ready && !Busy)
         {
@@ -2252,7 +2333,8 @@ public static class TextPanel
 
         try
         {
-            string report = AssetIo.SaveText(ProjectPanel.Folder, assetId, text, _entries[at].Text.Length);
+            string report = AssetIo.SaveText(ProjectPanel.Folder, assetId, text, _entries[at].Text.Length,
+                                           session.Rom.Layout.Latin1Documents);
 
             // The saved text is now the baseline.
             _entries[at] = _entries[at] with { Text = text };
@@ -2281,7 +2363,8 @@ public static class TextPanel
 
             try
             {
-                AssetIo.SaveText(ProjectPanel.Folder, id, Edits[id], _entries[at].Text.Length);
+                AssetIo.SaveText(ProjectPanel.Folder, id, Edits[id], _entries[at].Text.Length,
+                                 session.Rom.Layout.Latin1Documents);
                 _entries[at] = _entries[at] with { Text = Edits[id] };
                 Edits.Remove(id);
                 saved++;

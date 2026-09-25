@@ -91,7 +91,9 @@ public sealed class AssetDirectory
     /// <summary>Locates the directory via the overlay table and parses it.</summary>
     public static AssetDirectory Read(RomFile rom)
     {
-        int at = OverlayTable.TableRomOffset + DirectoryOverlayIndex * OverlayTable.RecordSize;
+        int table = OverlayTable.Locate(rom.Data);
+        if (table < 0) throw new InvalidOperationException("No overlay table in this ROM.");
+        int at = table + DirectoryOverlayIndex * OverlayTable.RecordSize;
         if (at + OverlayTable.RecordSize > rom.Length)
             throw new InvalidOperationException("Overlay table does not extend to the directory record.");
 

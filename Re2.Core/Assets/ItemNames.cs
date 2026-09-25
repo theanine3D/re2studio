@@ -23,14 +23,36 @@ public static class ItemNames
     /// <summary>Bytes available for the names, separators and all.</summary>
     public const int Capacity = (int)(TableAddress - NamesAddress);
 
-    public static List<string> Read(RomFile rom) => Read(ModelTextureTable.LoadMainOverlay(rom));
+    /// <summary>
+    /// Where a language's names and table are. English is the Rev 1 pair, moved for the build;
+    /// The alternate is the second pair: French in Europe, Japanese in Japan.
+    /// </summary>
+    private static (uint Names, uint Table) Where(ModelTextureTable.Overlay overlay, bool alternate)
+    {
+        if (!alternate) return (overlay.At(NamesAddress), overlay.At(TableAddress));
+        var alt = overlay.Layout?.AlternateInventoryText
+                  ?? throw new InvalidOperationException("This build has no second language.");
+        return (alt.NamesAddress, alt.NamesTable);
+    }
 
-    public static List<string> Read(ModelTextureTable.Overlay overlay)
+    /// <summary>Bytes available for one language's names in a build.</summary>
+    public static int CapacityFor(Re2Layout layout, bool alternate)
+        => alternate && layout.AlternateInventoryText is { } alt
+            ? (int)(alt.NamesTable - alt.NamesAddress)
+            : Capacity;
+
+    /// <summary>The glyph set one language of a build is written in.</summary>
+    public static ItemCharset CharsetOf(Re2Layout? layout, bool alternate)
+        => alternate ? layout?.AlternateInventoryText?.Charset ?? ItemCharset.English : ItemCharset.English;
+
+    public static List<string> Read(RomFile rom, bool alternate = false)
+        => Read(ModelTextureTable.LoadMainOverlay(rom), alternate);
+
+    public static List<string> Read(ModelTextureTable.Overlay overlay, bool alternate = false)
     {
         var names = new List<string>(Count);
 
-        uint table = overlay.At(TableAddress);
-        uint names0 = overlay.At(NamesAddress);
+        var (names0, table) = Where(overlay, alternate);
 
         for (int i = 0; i < Count; i++)
         {
@@ -40,7 +62,7 @@ public static class ItemNames
             int end = at;
             while (end < overlay.Data.Length && overlay.Data[end] != ItemText.NameSeparator) end++;
 
-            names.Add(ItemText.Decode(overlay.Data.AsSpan(at, end - at)));
+            names.Add(ItemText.Decode(overlay.Data.AsSpan(at, end - at), CharsetOf(overlay.Layout, alternate)));
         }
 
         return names;
@@ -50,28 +72,32 @@ public static class ItemNames
     /// How many of the available bytes a set of names would occupy, or -1 if one of them cannot be
     /// written.
     /// </summary>
-    public static int Measure(IReadOnlyList<string> names)
-        => Layout(names, out var bytes, out _, out _) ? bytes.Count : -1;
+    public static int Measure(IReadOnlyList<string> names, ItemCharset charset = ItemCharset.English)
+        => Layout(names, charset, out var bytes, out _, out _) ? bytes.Count : -1;
 
     /// <summary>Lays the names out and builds the table that indexes them.</summary>
     public static bool TryBuild(IReadOnlyList<string> names, out byte[] block, out byte[] table,
                                 out string error)
+        => TryBuild(names, Capacity, ItemCharset.English, out block, out table, out error);
+
+    public static bool TryBuild(IReadOnlyList<string> names, int capacity, ItemCharset charset,
+                                out byte[] block, out byte[] table, out string error)
     {
         block = Array.Empty<byte>();
         table = Array.Empty<byte>();
 
-        if (!Layout(names, out var bytes, out var offsets, out error)) return false;
+        if (!Layout(names, charset, out var bytes, out var offsets, out error)) return false;
 
-        if (bytes.Count > Capacity)
+        if (bytes.Count > capacity)
         {
-            error = $"The names need {bytes.Count:N0} bytes but only {Capacity:N0} are available, " +
-                    $"{bytes.Count - Capacity:N0} too many. Shorten some of them.";
+            error = $"The names need {bytes.Count:N0} bytes but only {capacity:N0} are available, " +
+                    $"{bytes.Count - capacity:N0} too many. Shorten some of them.";
             return false;
         }
 
         // The rest of the block is cleared rather than left holding whatever was there before, so
         // a shorter set of names cannot leave the tail of a longer one lying around.
-        var padded = new byte[Capacity];
+        var padded = new byte[capacity];
         bytes.CopyTo(padded);
 
         var indexed = new byte[Count * 2];
@@ -87,8 +113,8 @@ public static class ItemNames
     /// Runs the names together with their separators and records where each one landed, without yet
     /// caring whether the result fits.
     /// </summary>
-    private static bool Layout(IReadOnlyList<string> names, out List<byte> bytes, out int[] offsets,
-                               out string error)
+    private static bool Layout(IReadOnlyList<string> names, ItemCharset charset, out List<byte> bytes,
+                               out int[] offsets, out string error)
     {
         bytes = new List<byte> { ItemText.NameSeparator };
         offsets = new int[Count];
@@ -111,7 +137,7 @@ public static class ItemNames
 
             if (already.TryGetValue(name, out int shared)) { offsets[i] = shared; continue; }
 
-            if (!ItemText.TryEncode(name, out var codes, out error)) return false;
+            if (!ItemText.TryEncode(name, out var codes, out error, charset)) return false;
 
             offsets[i] = bytes.Count;
             bytes.AddRange(codes);
@@ -124,12 +150,14 @@ public static class ItemNames
 
     /// <summary>Writes a set of names into a decompressed overlay image in place.</summary>
     public static bool TryWrite(ModelTextureTable.Overlay overlay, IReadOnlyList<string> names,
-                                out string error)
+                                out string error, bool alternate = false)
     {
-        if (!TryBuild(names, out var block, out var table, out error)) return false;
+        int capacity = CapacityFor(overlay.Layout ?? Re2Layout.UsaRev1, alternate);
+        if (!TryBuild(names, capacity, CharsetOf(overlay.Layout, alternate), out var block, out var table, out error)) return false;
 
-        block.CopyTo(overlay.Data, (int)(overlay.At(NamesAddress) - overlay.BaseAddress));
-        table.CopyTo(overlay.Data, (int)(overlay.At(TableAddress) - overlay.BaseAddress));
+        var (at, tableAt) = Where(overlay, alternate);
+        block.CopyTo(overlay.Data, (int)(at - overlay.BaseAddress));
+        table.CopyTo(overlay.Data, (int)(tableAt - overlay.BaseAddress));
         return true;
     }
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
@@ -264,7 +264,7 @@ public static class RoomPanel
 
         // A cheat is the whole block, not a line: an emulator takes all of a cheat's lines as one
         // entry, so clicking anywhere in a block copies every line of it.
-        int delta = Re2Version.Detect(session.Rom).MainOverlayDelta;
+        int delta = session.Rom.Layout.RamDelta;
 
         foreach (var (title, codes) in GameSharkCodes.Groups(doors[pick], delta))
         {

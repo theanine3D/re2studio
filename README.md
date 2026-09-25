@@ -3,7 +3,16 @@
 
 A romhacking suite for **Resident Evil 2 on the Nintendo 64**. It comes as a desktop editor for Windows and Linux (RE2 Studio) and a command-line tool (`re2`), both capable of editing graphics, text, and sounds.
 
-This repository contains **no game data**. You need your own dump of the game: *Resident Evil 2 (USA)* or *Resident Evil 2 (USA) (Rev 1)*, as a `.z64`, `.v64` or `.n64` file.
+This repository contains **no game data**. You need your own dump of the game, as a `.z64`, `.v64` or `.n64` file. All four retail releases are supported:
+
+| Release | Notes |
+|---|---|
+| *Resident Evil 2 (USA)* (Rev 0) | |
+| *Resident Evil 2 (USA) (Rev 1)* | |
+| *Resident Evil 2 (Europe) (En,Fr)* | Item names and item text editable in **English or French**; French documents keep their accents |
+| *Biohazard 2 (Japan)* | Item names and item text editable in **English or Japanese** (kana and kanji); documents edited as images |
+
+The editor detects the release automatically and shows it in the window title. For Europe and Japan, a **language** selector on the Text tab's *Item names* and *Item text* pages switches between the English text and the release's second language. Japan opens on Japanese, the language its players see.
 
 ## What it can do
 
@@ -17,10 +26,14 @@ This repository contains **no game data**. You need your own dump of the game: *
 | Sound effects and music (1,192 samples) | ✓ with playback | WAV | WAV |
 | Voice dialogue (588 clips, MORT codec) | ✓ with playback | WAV | WAV |
 | FMVs (271 MPEG-1 movies) | ✓ with playback* | `.m2v` | video, via ffmpeg* |
-| Documents, item names and item descriptions | ✓ | text | text |
+| Documents, item names and item descriptions | ✓ | text† | text† |
 | Rooms, cameras and doors | ✓ | GameShark codes | — |
 
 \* ffmpeg must be on your `PATH` for FMV playback and for importing anything other than `.m2v`.
+
+† Japan's documents are pictures of text rather than strings, so they are exported and imported as PNG pages instead.
+
+Counts are for the USA release; Europe and Japan differ slightly (for example, 589 voice clips).
 
 Editing always goes through a **project folder**:
 
@@ -30,16 +43,19 @@ Editing always goes through a **project folder**:
 
 Your original ROM is never modified. A build from an unedited project is byte-identical to the source ROM. The Project tab can also create and apply **BPS** patches for distributing a hack.
 
+Each release numbers its assets differently, so a project only works with the release it was extracted from. The editor keeps them apart, with default folders named `re2-project`, `re2-project-eu` and `re2-project-jp`.
+
 ## Building
 
 You need the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 **Platform support:** Windows and **Linux** (x64). Both the editor and the command-line tool are tested on Ubuntu 22.04. The tests include a full extract-and-rebuild that reproduces the ROM byte for byte, and the whole test suite passes. macOS should work for the command-line tool but is untested.
 
-On Linux, the editor uses standard desktop tools for three features:
+On Linux, the editor relies on these standard desktop packages:
 
 | Feature | Needs one of |
 |---|---|
+| Japanese item text (Japan release only) | a Japanese font: `fonts-noto-cjk` or `fonts-ipafont-gothic` (Windows already has one) |
 | File browser (the **Choose...** buttons) | `zenity` or `kdialog` |
 | Copy image to clipboard | `wl-copy` (Wayland) or `xclip` (X11) |
 | Sound and voice playback | `paplay`, `pw-play` or `aplay` |
@@ -87,6 +103,7 @@ Most tests need the retail ROM and are skipped without it. To run them:
 - For the Rev 0 / Rev 1 comparison tests, put both No-Intro dumps in the same folder:
   - `Resident Evil 2 (USA).z64`
   - `Resident Evil 2 (USA) (Rev 1).z64`
+- For the Europe and Japan tests, also put `Resident Evil 2 (Europe) (En,Fr)` and `Biohazard 2 (Japan)` (`.n64`, `.z64` or `.v64`) in that folder.
 
 ## Repository layout
 
@@ -101,7 +118,7 @@ Most tests need the retail ROM and are skipped without it. To run them:
 
 ## Documentation
 
-[RE2 N64 Format Specification](https://github.com/theanine3D/re2studio/wiki/Resident-Evil-2-(Nintendo-64)-%E2%80%94-Data-Format-Specification) documents how the game stores and encodes everything above: containers, compression, models, animation, audio codecs, text and lookup tables. It is written for anyone building their own tools.
+[RE2 N64 Format Specification](https://github.com/theanine3D/re2studio/wiki/Resident-Evil-2-(Nintendo-64)-%E2%80%94-Data-Format-Specification) documents how the game stores and encodes everything above: containers, compression, models, animation, audio codecs, text and lookup tables. It covers all four releases, including where Europe and Japan differ, and is written for anyone building their own tools.
 
 ## Previews
 <img style="width:50%" alt="image" src="https://github.com/user-attachments/assets/75b4d28f-6ae4-444f-a618-e92e792c46cd" /><img style="width:50%" alt="image" src="https://github.com/user-attachments/assets/716e4160-952a-433f-ab1d-d15c9d576ac5" />

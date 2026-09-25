@@ -11,10 +11,17 @@ public static class ItemTextFile
 {
     public const string Name = "text/item-text.txt";
 
-    public static string PathIn(string folder)
-        => Path.Combine(folder, Name.Replace('/', Path.DirectorySeparatorChar));
+    /// <summary>
+    /// The file for one language: the English has no suffix, a build's second language carries its
+    /// own ("fr", "ja") beside it.
+    /// </summary>
+    public static string NameOf(string? language)
+        => string.IsNullOrEmpty(language) ? Name : Name.Replace(".txt", $"-{language}.txt");
 
-    public static bool ExistsIn(string folder) => File.Exists(PathIn(folder));
+    public static string PathIn(string folder, string? language = null)
+        => Path.Combine(folder, NameOf(language).Replace('/', Path.DirectorySeparatorChar));
+
+    public static bool ExistsIn(string folder, string? language = null) => File.Exists(PathIn(folder, language));
 
     private const string Preamble =
         "# The item examine text, one record per '#number' marker, in the order the game indexes\n" +
@@ -24,9 +31,9 @@ public static class ItemTextFile
         "# not known -- all three type back exactly as they read. The editor's Text tab shows the\n" +
         "# same thing with a byte budget beside it.\n";
 
-    public static void Write(string folder, IReadOnlyList<string> records)
+    public static void Write(string folder, IReadOnlyList<string> records, string? language = null)
     {
-        string path = PathIn(folder);
+        string path = PathIn(folder, language);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
 
         var text = new StringBuilder(Preamble.Replace("\n", Environment.NewLine));
@@ -41,14 +48,15 @@ public static class ItemTextFile
     }
 
     /// <summary>Reads the records back.</summary>
-    public static bool TryRead(string folder, out List<string> records, out string error)
+    public static bool TryRead(string folder, out List<string> records, out string error, string? language = null)
     {
         var found = new List<string>();
         records = found;
         error = "";
 
-        string path = PathIn(folder);
-        if (!File.Exists(path)) { error = $"{Name} is not in the project folder."; return false; }
+        string name = NameOf(language);
+        string path = PathIn(folder, language);
+        if (!File.Exists(path)) { error = $"{name} is not in the project folder."; return false; }
 
         string text = SharedFile.ReadAllText(path).Replace("\r\n", "\n");
 
@@ -70,7 +78,7 @@ public static class ItemTextFile
 
         foreach (string line in lines)
         {
-            if (IsMarker(line, found.Count + (started ? 1 : 0), out string markerError))
+            if (IsMarker(line, name, found.Count + (started ? 1 : 0), out string markerError))
             {
                 if (markerError.Length > 0) { error = markerError; return false; }
                 Close();
@@ -85,7 +93,7 @@ public static class ItemTextFile
 
         if (found.Count != ItemMessages.Count)
         {
-            error = $"{Name} holds {found.Count} records but there must be exactly " +
+            error = $"{name} holds {found.Count} records but there must be exactly " +
                     $"{ItemMessages.Count}. A record's number is what the game looks it up by, so " +
                     "markers cannot be added or removed.";
             return false;
@@ -95,7 +103,7 @@ public static class ItemTextFile
     }
 
     /// <summary>Is this a record marker, and if so is it the one expected next?</summary>
-    private static bool IsMarker(string line, int expected, out string error)
+    private static bool IsMarker(string line, string name, int expected, out string error)
     {
         error = "";
 
@@ -104,7 +112,7 @@ public static class ItemTextFile
         if (!int.TryParse(trimmed.AsSpan(1), out int number)) return false;
 
         if (number != expected)
-            error = $"{Name}: found marker #{number} where #{expected} was expected. " +
+            error = $"{name}: found marker #{number} where #{expected} was expected. " +
                     "The records must stay in order and none may be left out.";
 
         return true;

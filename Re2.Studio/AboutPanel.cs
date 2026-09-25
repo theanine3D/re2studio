@@ -20,7 +20,7 @@ public static class AboutPanel
     public const string DownloadUrl = "https://www.github.com/theanine3d/re2studio";
 
     /// <summary>Shown next to the title. Free text -- it is not read by anything else.</summary>
-    public const string Version = "1.0";
+    public const string Version = "1.1";
 
     /// <summary>One-line description under the title.</summary>
     public const string Description =

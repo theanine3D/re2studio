@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Re2.Core.Emulation;
@@ -251,7 +251,7 @@ public static class MortCodec
             cpu.Reg[4] = ContextAt;
             cpu.Reg[5] = OutputAt;
             cpu.Reg[29] = StackTop;
-            cpu.Call(DecodeBlock);
+            cpu.Call(cpu.Layout.Address(DecodeBlock));
 
             for (int i = 0; i < SamplesPerBlock; i++)
                 samples[block * SamplesPerBlock + i] = (short)cpu.Read16(OutputAt + (uint)i * 2);

@@ -50,7 +50,7 @@ public static class DoorTable
 
         for (int flat = 0; flat < rooms.Count; flat++)
         {
-            var script = Script(rom, directory, ScriptBase + flat);
+            var script = Script(rom, directory, rom.Layout.DoorScriptBase + flat);
             if (script.IsEmpty) continue;
 
             for (int pc = 0; pc + OpcodeLength <= script.Length; pc++)

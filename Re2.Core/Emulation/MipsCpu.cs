@@ -15,6 +15,9 @@ public sealed class MipsUnsupportedException : Exception
 /// </summary>
 public sealed class MipsCpu
 {
+    /// <summary>Which build's code is loaded, so callers can find its entry points.</summary>
+    public Re2.Core.Rom.Re2Layout Layout { get; set; } = Re2.Core.Rom.Re2Layout.UsaRev1;
+
     /// <summary>RDRAM, addressed through the 0x80000000 / 0xA0000000 segments.</summary>
     public byte[] Ram { get; }
 

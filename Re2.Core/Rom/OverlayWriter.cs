@@ -46,7 +46,7 @@ public static class OverlayWriter
         // its tail for data.
         rom.Data.AsSpan(entry.RomOffset + stored.Length, entry.CompressedSize - stored.Length).Clear();
 
-        int record = OverlayTable.TableRomOffset + entry.Index * OverlayTable.RecordSize;
+        int record = OverlayTable.Locate(rom.Data) + entry.Index * OverlayTable.RecordSize;
         BinaryPrimitives.WriteUInt32BigEndian(rom.Data.AsSpan(record + 4, 4), (uint)stored.Length);
 
         return true;

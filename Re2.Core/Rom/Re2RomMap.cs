@@ -89,7 +89,7 @@ public static class Re2RomMap
 
     /// <summary>Whether this is the game the tools know.</summary>
     public static bool IsExpectedRom(RomFile rom)
-        => rom.GameCode == ExpectedGameCode && rom.Length >= ExpectedLength;
+        => rom.GameCode is ExpectedGameCode or "NREP" or "NB5J" && rom.Length >= ExpectedLength;
 
     /// <summary>True for a ROM that has been grown past the retail cart size.</summary>
     public static bool IsExpanded(RomFile rom) => rom.Length > ExpectedLength;

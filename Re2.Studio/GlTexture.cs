@@ -116,6 +116,13 @@ public sealed class TextureCache : IDisposable
         return texture;
     }
 
+    /// <summary>Drops one texture, so the next Get builds it afresh from changed content.</summary>
+    public void Forget(int key)
+    {
+        if (_entries.Remove(key, out var old)) old.Dispose();
+        _lastUsed.Remove(key);
+    }
+
     public void Dispose()
     {
         foreach (var texture in _entries.Values) texture.Dispose();

@@ -41,7 +41,11 @@ public static class AudioPlayer
             if (_looping) return true;
 
             // Nothing reports completion, so treat the clock running past the sample as finished.
-            if (Clock.Elapsed.TotalSeconds >= _duration) { Stop(); return false; }
+            // Only the UI state ends here: the device may still be playing, because output starts
+            // late (tens to hundreds of milliseconds, more on Bluetooth), and purging now would
+            // silence a short sample before any of it was heard. The buffer stays pinned until
+            // the next Play or Stop.
+            if (Clock.Elapsed.TotalSeconds >= _duration) { Finish(); return false; }
             return true;
         }
     }
@@ -146,6 +150,12 @@ public static class AudioPlayer
         }
 
         Release();
+        Finish();
+    }
+
+    /// <summary>Marks playback over without touching the device.</summary>
+    private static void Finish()
+    {
         PlayingIndex = -1;
         _looping = false;
         _duration = 0;

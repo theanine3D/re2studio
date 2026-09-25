@@ -69,4 +69,84 @@ public sealed class SoundImportOverrideTests
             try { if (File.Exists(wav)) File.Delete(wav); } catch (IOException) { }
         }
     }
+
+    /// <summary>
+    /// Imports made faster than the background rescan, as a user replacing several samples in a
+    /// row does: each must start from the bank the last one wrote, not from the session's older view.
+    /// </summary>
+    [RomFact]
+    public void BackToBackImportsAllLand()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "re2-sound-" + Guid.NewGuid().ToString("N")[..8]);
+        string wav = Path.Combine(Path.GetTempPath(), "re2-tone-" + Guid.NewGuid().ToString("N")[..8] + ".wav");
+
+        try
+        {
+            Re2.Core.Project.ProjectFolder.Extract(TestRom.Rom, folder);
+            File.WriteAllBytes(wav, Wav(11025, 0.5));
+
+            using var session = new RomSession(TestRom.Path!);
+            int[] targets = { 430, 431, 432, 500, 1114 };
+
+            // No rescan in between: the session still shows the cart the whole time.
+            foreach (int index in targets)
+                AssetIo.ImportSound(session, folder, index, wav);
+
+            AssertAllReplaced(session, folder, targets);
+        }
+        finally
+        {
+            try { if (Directory.Exists(folder)) Directory.Delete(folder, true); } catch (IOException) { }
+            try { if (File.Exists(wav)) File.Delete(wav); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
+    /// A WAV edited by hand in the project, then an import of another sample: after the rescan the
+    /// bank must hold both, since a pending WAV edit makes the scan rebuild from the cart.
+    /// </summary>
+    [RomFact]
+    public void AnImportKeepsAHandEditedWav()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "re2-sound-" + Guid.NewGuid().ToString("N")[..8]);
+        string wav = Path.Combine(Path.GetTempPath(), "re2-tone-" + Guid.NewGuid().ToString("N")[..8] + ".wav");
+
+        try
+        {
+            Re2.Core.Project.ProjectFolder.Extract(TestRom.Rom, folder);
+            File.WriteAllBytes(wav, Wav(11025, 0.5));
+
+            using var session = new RomSession(TestRom.Path!);
+            AssetIo.ImportSound(session, folder, 430, wav);
+
+            string handEdited = Directory.GetFiles(Path.Combine(folder, "assets", "sounds", "samples"), "snd0431_*.wav")[0];
+            File.WriteAllBytes(handEdited, Wav(11025, 0.5));
+
+            string log = AssetIo.ImportSound(session, folder, 432, wav);
+            Assert.Contains("431", log);
+
+            AssertAllReplaced(session, folder, new[] { 430, 431, 432 });
+        }
+        finally
+        {
+            try { if (Directory.Exists(folder)) Directory.Delete(folder, true); } catch (IOException) { }
+            try { if (File.Exists(wav)) File.Delete(wav); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>After a rescan, each target plays something other than the cart's audio.</summary>
+    private static void AssertAllReplaced(RomSession session, string folder, int[] targets)
+    {
+        session.Overrides.Scan(folder, session.Rom);
+        session.Overrides.WaitForScan();
+        session.InvalidateCaches();
+
+        foreach (int index in targets)
+        {
+            var now = session.Sounds.Samples.First(s => s.Index == index);
+            var cart = session.CartSounds.Samples.First(s => s.Index == index);
+            Assert.False(session.Sounds.Decode(now).SequenceEqual(session.CartSounds.Decode(cart)),
+                         $"sample {index} still holds the cart's audio");
+        }
+    }
 }

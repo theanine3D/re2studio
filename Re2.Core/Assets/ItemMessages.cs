@@ -44,32 +44,52 @@ public static class ItemMessages
         return itemId >= 1 && itemId < ItemNames.Count ? itemId : -1;
     }
 
-    public static List<string> Read(RomFile rom) => Read(ModelTextureTable.LoadMainOverlay(rom));
-
-    public static List<string> Read(ModelTextureTable.Overlay overlay)
+    /// <summary>Where a language's text and table are; the alternate is Europe's French or Japan's Japanese.</summary>
+    private static (uint Text, uint Table) Where(ModelTextureTable.Overlay overlay, bool alternate)
     {
-        var offsets = ReadOffsets(overlay);
+        if (!alternate) return (overlay.At(TextAddress), overlay.At(TableAddress));
+        var alt = overlay.Layout?.AlternateInventoryText
+                  ?? throw new InvalidOperationException("This build has no second language.");
+        return (alt.MessagesText, alt.MessagesTable);
+    }
+
+    /// <summary>Bytes available for one language's messages in a build.</summary>
+    public static int CapacityFor(Re2Layout layout, bool alternate)
+        => alternate && layout.AlternateInventoryText is { } alt
+            ? (int)(alt.MessagesTable - alt.MessagesText)
+            : Capacity;
+
+    /// <summary>The glyph set one language of a build is written in.</summary>
+    public static ItemCharset CharsetOf(Re2Layout? layout, bool alternate)
+        => alternate ? layout?.AlternateInventoryText?.Charset ?? ItemCharset.English : ItemCharset.English;
+
+    public static List<string> Read(RomFile rom, bool alternate = false)
+        => Read(ModelTextureTable.LoadMainOverlay(rom), alternate);
+
+    public static List<string> Read(ModelTextureTable.Overlay overlay, bool alternate = false)
+    {
+        var (textAt, tableAt) = Where(overlay, alternate);
+        var offsets = ReadOffsets(overlay, tableAt);
         var text = new List<string>(Count);
 
-        int start = (int)(overlay.At(TextAddress) - overlay.BaseAddress);
+        int start = (int)(textAt - overlay.BaseAddress);
 
         // The block is longer than the text in it, and the slack is zeroes.
-        int used = Capacity;
+        int used = CapacityFor(overlay.Layout ?? Re2Layout.UsaRev1, alternate);
         while (used > 0 && overlay.Data[start + used - 1] == 0) used--;
 
         for (int i = 0; i < Count; i++)
         {
             int from = offsets[i];
             int to = EndOf(offsets, from, used);
-            text.Add(ItemText.Decode(overlay.Data.AsSpan(start + from, Math.Max(0, to - from))));
+            text.Add(ItemText.Decode(overlay.Data.AsSpan(start + from, Math.Max(0, to - from)), CharsetOf(overlay.Layout, alternate)));
         }
 
         return text;
     }
 
-    private static int[] ReadOffsets(ModelTextureTable.Overlay overlay)
+    private static int[] ReadOffsets(ModelTextureTable.Overlay overlay, uint table)
     {
-        uint table = overlay.At(TableAddress);
         var offsets = new int[Count];
         for (int i = 0; i < Count; i++) offsets[i] = overlay.U16(table + (uint)i * 2);
         return offsets;
@@ -84,26 +104,30 @@ public static class ItemMessages
     }
 
     /// <summary>How many of the available bytes these messages would occupy, or -1 if one cannot be written.</summary>
-    public static int Measure(IReadOnlyList<string> messages)
-        => Layout(messages, out var bytes, out _, out _) ? bytes.Count : -1;
+    public static int Measure(IReadOnlyList<string> messages, ItemCharset charset = ItemCharset.English)
+        => Layout(messages, charset, out var bytes, out _, out _) ? bytes.Count : -1;
 
     /// <summary>Lays the messages out and builds the table that indexes them.</summary>
     public static bool TryBuild(IReadOnlyList<string> messages, out byte[] block, out byte[] table,
                                 out string error)
+        => TryBuild(messages, Capacity, ItemCharset.English, out block, out table, out error);
+
+    public static bool TryBuild(IReadOnlyList<string> messages, int capacity, ItemCharset charset,
+                                out byte[] block, out byte[] table, out string error)
     {
         block = Array.Empty<byte>();
         table = Array.Empty<byte>();
 
-        if (!Layout(messages, out var bytes, out var offsets, out error)) return false;
+        if (!Layout(messages, charset, out var bytes, out var offsets, out error)) return false;
 
-        if (bytes.Count > Capacity)
+        if (bytes.Count > capacity)
         {
-            error = $"The item text needs {bytes.Count:N0} bytes but only {Capacity:N0} are " +
-                    $"available, {bytes.Count - Capacity:N0} too many. Shorten something.";
+            error = $"The item text needs {bytes.Count:N0} bytes but only {capacity:N0} are " +
+                    $"available, {bytes.Count - capacity:N0} too many. Shorten something.";
             return false;
         }
 
-        var padded = new byte[Capacity];
+        var padded = new byte[capacity];
         bytes.CopyTo(padded);
 
         var indexed = new byte[Count * 2];
@@ -116,8 +140,8 @@ public static class ItemMessages
     }
 
     /// <summary>Runs the records together and records where each one landed.</summary>
-    private static bool Layout(IReadOnlyList<string> messages, out List<byte> bytes, out int[] offsets,
-                               out string error)
+    private static bool Layout(IReadOnlyList<string> messages, ItemCharset charset, out List<byte> bytes,
+                               out int[] offsets, out string error)
     {
         bytes = new List<byte>();
         offsets = new int[Count];
@@ -135,7 +159,7 @@ public static class ItemMessages
         {
             if (already.TryGetValue(messages[i], out int shared)) { offsets[i] = shared; continue; }
 
-            if (!ItemText.TryEncode(messages[i], out var codes, out error)) return false;
+            if (!ItemText.TryEncode(messages[i], out var codes, out error, charset)) return false;
 
             offsets[i] = bytes.Count;
             bytes.AddRange(codes);
@@ -147,12 +171,14 @@ public static class ItemMessages
 
     /// <summary>Writes a set of messages into a decompressed overlay image in place.</summary>
     public static bool TryWrite(ModelTextureTable.Overlay overlay, IReadOnlyList<string> messages,
-                                out string error)
+                                out string error, bool alternate = false)
     {
-        if (!TryBuild(messages, out var block, out var table, out error)) return false;
+        int capacity = CapacityFor(overlay.Layout ?? Re2Layout.UsaRev1, alternate);
+        if (!TryBuild(messages, capacity, CharsetOf(overlay.Layout, alternate), out var block, out var table, out error)) return false;
 
-        block.CopyTo(overlay.Data, (int)(overlay.At(TextAddress) - overlay.BaseAddress));
-        table.CopyTo(overlay.Data, (int)(overlay.At(TableAddress) - overlay.BaseAddress));
+        var (textAt, tableAt) = Where(overlay, alternate);
+        block.CopyTo(overlay.Data, (int)(textAt - overlay.BaseAddress));
+        table.CopyTo(overlay.Data, (int)(tableAt - overlay.BaseAddress));
         return true;
     }
 }

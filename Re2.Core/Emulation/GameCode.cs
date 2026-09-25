@@ -7,7 +7,7 @@ namespace Re2.Core.Emulation;
 public static class GameCode
 {
     /// <summary>Where the boot segment's RAM image begins in the ROM.</summary>
-    public const int BootRomBase = OverlayTable.TableRomOffset - 0x12150;
+    public const int BootRomBase = 0xB80;
 
     public const uint RamBase = 0x80000000;
 
@@ -18,11 +18,16 @@ public static class GameCode
 
     public static MipsCpu Load(RomFile rom)
     {
-        var cpu = new MipsCpu();
+        var cpu = new MipsCpu { Layout = rom.Layout };
 
-        cpu.Load(RamBase, rom.Data.AsSpan(BootRomBase, BootSize));
+        var entries = OverlayTable.Read(rom.Data);
 
-        foreach (var entry in OverlayTable.Read(rom.Data))
+        // The boot segment runs up to overlay 1, which is 0x90 further on in Japan.
+        var first = entries.Find(e => e.Index == MainOverlayIndex);
+        int bootSize = first is null ? BootSize : first.RomOffset - BootRomBase;
+        cpu.Load(RamBase, rom.Data.AsSpan(BootRomBase, bootSize));
+
+        foreach (var entry in entries)
         {
             if (entry.Index != MainOverlayIndex) continue;
             if (!OverlayTable.TryDecompress(rom.Data, entry, out var image))

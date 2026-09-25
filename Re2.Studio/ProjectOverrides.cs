@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -238,6 +238,12 @@ public sealed class ProjectOverrides : IDisposable
         var (ready, message) = AssetIo.DescribeProject(folder);
         if (!ready) return new Snapshot(bytes, items, message);
 
+        // A USA project over the Europe cart (or the reverse) numbers every asset differently, so
+        // none of its files can be laid over this ROM.
+        if (!ProjectFolder.FitsRom(folder, rom))
+            return new Snapshot(bytes, items,
+                "this project was extracted from a differently numbered release; extract this ROM into its own folder");
+
         try
         {
             var manifest = JsonSerializer.Deserialize<ProjectManifest>(
@@ -276,7 +282,7 @@ public sealed class ProjectOverrides : IDisposable
                 }
 
                 // The voice bank used to be filed with the sample bank as plain "sound".
-                if (blob.Ids.Contains(Re2.Core.Assets.VoiceBank.AssetId)) category = "dialogue";
+                if (blob.Ids.Contains(rom.Layout.VoiceBankAsset)) category = "dialogue";
 
                 items.Add(new Item(blob.Ids.Min(), blob.Ids, category, blob.File,
                                    blob.DeclaredSize, current.Length));

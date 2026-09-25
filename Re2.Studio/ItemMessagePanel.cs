@@ -38,24 +38,32 @@ public static class ItemMessagePanel
     private static IReadOnlyList<string> Names =>
         ItemNamePanel.Live is { Count: > 0 } live ? live : _loadedNames;
 
+    private static bool Fr => InventoryLanguage.Alternate;
+
+    /// <summary>True while a record has been changed and not yet saved.</summary>
+    internal static bool HasUnsavedEdits =>
+        _records is not null && _edited is not null && !_records.SequenceEqual(_edited);
+
     public static void Draw(RomSession session)
     {
+        InventoryLanguage.Draw(session);
+
         if (_records is null)
         {
-            _records = ItemTextFile.ExistsIn(ProjectPanel.Folder) &&
-                       ItemTextFile.TryRead(ProjectPanel.Folder, out var saved, out _)
+            _records = ItemTextFile.ExistsIn(ProjectPanel.Folder, InventoryLanguage.FileSuffix) &&
+                       ItemTextFile.TryRead(ProjectPanel.Folder, out var saved, out _, InventoryLanguage.FileSuffix)
                 ? saved
-                : ItemMessages.Read(session.Rom);
+                : ItemMessages.Read(session.Rom, Fr);
 
             _edited = new List<string>(_records);
             _selected = Math.Clamp(_selected, 0, _edited.Count - 1);
             _buffer = _edited[_selected];
 
             // Shown beside each record; read from the project when it has them, as the names panel does.
-            _loadedNames = ItemNameFile.ExistsIn(ProjectPanel.Folder) &&
-                     ItemNameFile.TryRead(ProjectPanel.Folder, out var savedNames, out _)
+            _loadedNames = ItemNameFile.ExistsIn(ProjectPanel.Folder, InventoryLanguage.FileSuffix) &&
+                     ItemNameFile.TryRead(ProjectPanel.Folder, out var savedNames, out _, InventoryLanguage.FileSuffix)
                 ? savedNames
-                : ItemNames.Read(session.Rom);
+                : ItemNames.Read(session.Rom, Fr);
         }
 
         var records = _edited!;
@@ -69,20 +77,20 @@ public static class ItemMessagePanel
         }
         _pending = -1;
 
-        int used = ItemMessages.Measure(records);
+        int used = ItemMessages.Measure(records, InventoryLanguage.Charset);
         bool encodable = used >= 0;
-        int spare = ItemMessages.Capacity - used;
+        int spare = InventoryLanguage.MessagesCapacity - used;
         int changed = records.Where((t, i) => t != _records[i]).Count();
 
         if (encodable)
         {
-            ImGui.Text($"{records.Count} records   {used:N0} of {ItemMessages.Capacity:N0} bytes   " +
+            ImGui.Text($"{records.Count} records   {used:N0} of {InventoryLanguage.MessagesCapacity:N0} bytes   " +
                        $"{changed} edited");
             ImGui.SameLine();
             if (spare >= 0) ImGui.TextDisabled($"({spare:N0} spare)");
             else ImGui.TextColored(Red, $"({-spare:N0} over -- shorten something)");
 
-            ImGui.ProgressBar(Math.Clamp(used / (float)ItemMessages.Capacity, 0, 1),
+            ImGui.ProgressBar(Math.Clamp(used / (float)InventoryLanguage.MessagesCapacity, 0, 1),
                               new Vector2(-1, 6), "");
         }
         else ImGui.TextColored(Red, "One of the records uses a character the game cannot draw.");
@@ -103,7 +111,7 @@ public static class ItemMessagePanel
                 : changed == 0 ? "Nothing to save: these match the project."
                 : !encodable ? "One of the records cannot be written in the game's characters."
                 : spare < 0 ? "The text does not fit. Shorten something first."
-                : $"Writes {ItemTextFile.Name} in the project folder.");
+                : $"Writes {ItemTextFile.NameOf(InventoryLanguage.FileSuffix)} in the project folder.");
 
         ImGui.SameLine();
         ImGui.BeginDisabled(changed == 0);
@@ -157,7 +165,7 @@ public static class ItemMessagePanel
 
     private static void DrawEditor(List<string> records)
     {
-        int cost = ItemText.MeasureOrMinusOne(_buffer);
+        int cost = ItemText.MeasureOrMinusOne(_buffer, InventoryLanguage.Charset);
         bool dirty = records[_selected] != _records![_selected];
 
         int owner = ItemMessages.ItemForRecord(_selected);
@@ -185,7 +193,7 @@ public static class ItemMessagePanel
 
         ImGui.SameLine();
         if (cost < 0) ImGui.TextColored(Red, "cannot be written as it stands");
-        else if (dirty) ImGui.TextColored(Amber, $"{cost} bytes, was {ItemText.MeasureOrMinusOne(_records[_selected])}");
+        else if (dirty) ImGui.TextColored(Amber, $"{cost} bytes, was {ItemText.MeasureOrMinusOne(_records[_selected], InventoryLanguage.Charset)}");
         else ImGui.TextDisabled($"{cost} bytes");
 
         // Room for the legend and the buttons below it.
@@ -195,7 +203,7 @@ public static class ItemMessagePanel
 
         if (cost < 0)
         {
-            ItemText.TryEncode(_buffer, out _, out string why);
+            ItemText.TryEncode(_buffer, out _, out string why, InventoryLanguage.Charset);
             ImGui.TextColored(Red, why);
         }
 
@@ -213,8 +221,8 @@ public static class ItemMessagePanel
         ImGui.PushStyleColor(ImGuiCol.Text, ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]);
         ImGui.TextWrapped("A line break is a newline. <FD> starts a new page of the message, " +
                           "<FE> ends it, and <XX> is any other code whose meaning is not known -- " +
-                          "all three type back exactly as they read. Letters, digits, space and " +
-                          ". , ! ? / ' - are all the game can draw; anything else is refused " +
+                          "all three type back exactly as they read. The game can draw " +
+                          InventoryLanguage.Characters + "; anything else is refused " +
                           "rather than silently dropped.");
         ImGui.PopStyleColor();
     }
@@ -233,9 +241,9 @@ public static class ItemMessagePanel
     {
         try
         {
-            ItemTextFile.Write(ProjectPanel.Folder, _edited!);
+            ItemTextFile.Write(ProjectPanel.Folder, _edited!, InventoryLanguage.FileSuffix);
             _records = new List<string>(_edited!);
-            _status = $"saved {ItemTextFile.Name} -- now Build ROM on the Project tab";
+            _status = $"saved {ItemTextFile.NameOf(InventoryLanguage.FileSuffix)} -- now Build ROM on the Project tab";
         }
         catch (Exception ex)
         {

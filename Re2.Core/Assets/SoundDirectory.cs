@@ -77,7 +77,7 @@ public sealed class SoundDirectory
             return data;
         }
 
-        return ReadFrom(Load(SampleDirectoryAssetId), Load(SampleDataAssetId));
+        return ReadFrom(Load(rom.Layout.SampleDirectoryAsset), Load(rom.Layout.SampleDataAsset));
     }
 
     /// <summary>

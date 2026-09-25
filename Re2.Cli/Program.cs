@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -143,7 +143,7 @@ public static class Program
         var rom = RomFile.Load(RequireArg(args, index, "rom"));
         if (!Re2RomMap.IsExpectedRom(rom))
             Console.Error.WriteLine(
-                $"warning: expected {Re2RomMap.ExpectedGameCode} of at least " +
+                $"warning: expected {Re2RomMap.ExpectedGameCode}, NREP or NB5J of at least " +
                 $"{Re2RomMap.ExpectedLength / (1024 * 1024)} MB, got {rom.GameCode} at " +
                 $"{rom.Length / (1024 * 1024)} MB. Offsets may not apply.");
         else if (Re2RomMap.IsExpanded(rom))
@@ -197,9 +197,10 @@ public static class Program
     {
         var rom = LoadRom(args, 1);
         var entries = OverlayTable.Read(rom.Data);
-        if (entries.Count == 0) return Fail($"No overlay table at ROM 0x{OverlayTable.TableRomOffset:X}.");
+        if (entries.Count == 0) return Fail("No overlay table in this ROM.");
 
-        Console.WriteLine($"overlay table at ROM 0x{OverlayTable.TableRomOffset:X} (RAM 0x{OverlayTable.TableRamAddress:X8}), {entries.Count} entries");
+        int table = OverlayTable.Locate(rom.Data);
+        Console.WriteLine($"overlay table at ROM 0x{table:X} (RAM 0x{table - 0xB80 + 0x80000000:X8}), {entries.Count} entries");
         Console.WriteLine();
         Console.WriteLine($"{"idx",4} {"romOff",9} {"cSize",9} {"load",12} {"end",12} {"dSize",9}  status");
 
@@ -732,8 +733,8 @@ public static class Program
             Console.WriteLine($"  wrote {blob.File}  {bytes.Length:N0} bytes (was {blob.DeclaredSize:N0})");
         }
 
-        WriteAsset(SoundDirectory.SampleDirectoryAssetId, table);
-        WriteAsset(SoundDirectory.SampleDataAssetId, data);
+        WriteAsset(rom.Layout.SampleDirectoryAsset, table);
+        WriteAsset(rom.Layout.SampleDataAsset, data);
 
         Console.WriteLine();
         Console.WriteLine($"replaced {replacements.Count} sample(s); run 'build' to produce the ROM.");
@@ -810,7 +811,7 @@ public static class Program
                 continue;
             }
 
-            var bytes = TextTable.Encode(item.text);
+            var bytes = TextTable.Encode(item.text, rom.Layout.Latin1Documents);
             File.WriteAllBytes(Path.Combine(project, blob.File.Replace('/', Path.DirectorySeparatorChar)), bytes);
             Console.WriteLine($"  {item.id}  {before?.Text.Length ?? 0} -> {bytes.Length} bytes");
             written++;
@@ -1711,7 +1712,7 @@ public static class Program
     {
         var rom = LoadRom(args, 1);
         var directory = AssetDirectory.Read(rom);
-        var entry = directory.Entries.First(e => e.Index == VoiceBank.AssetId);
+        var entry = directory.Entries.First(e => e.Index == rom.Layout.VoiceBankAsset);
         directory.TryGetData(rom, entry, out var bank);
 
         var clips = VoiceBank.Read(bank);
@@ -1740,7 +1741,7 @@ public static class Program
     {
         var rom = LoadRom(args, 1);
         var directory = AssetDirectory.Read(rom);
-        var entry = directory.Entries.First(e => e.Index == VoiceBank.AssetId);
+        var entry = directory.Entries.First(e => e.Index == rom.Layout.VoiceBankAsset);
         directory.TryGetData(rom, entry, out var bank);
 
         var clips = VoiceBank.Read(bank);

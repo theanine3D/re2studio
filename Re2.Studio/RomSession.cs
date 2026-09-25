@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Re2.Core.Assets;
@@ -166,7 +166,7 @@ public sealed class RomSession : IDisposable
             // Only what a room actually places, plus the strays sitting among them.
             if (!byMesh.TryGetValue(mesh, out var textures))
             {
-                if (mesh < SceneryFirstAssetId || mesh > SceneryLastAssetId) continue;
+                if (mesh < Rom.Layout.SceneryFirstAsset || mesh > Rom.Layout.SceneryLastAsset) continue;
                 textures = empty;
             }
 
@@ -176,10 +176,6 @@ public sealed class RomSession : IDisposable
 
         return scenery;
     }
-
-    /// <summary>The run of asset ids the scenery models occupy.</summary>
-    private const int SceneryFirstAssetId = 7875;
-    private const int SceneryLastAssetId = 8083;
 
     /// <summary>The voice bank: cutscene and event dialogue, 588 clips.</summary>
     public IReadOnlyList<VoiceClip> Voices => _voices ??= VoiceBank.Read(Rom, Assets);
@@ -203,7 +199,7 @@ public sealed class RomSession : IDisposable
             if (_voiceBank is not null) return _voiceBank;
 
             foreach (var entry in Assets.Entries)
-                if (entry.Index == VoiceBank.AssetId && Assets.TryGetData(Rom, entry, out var data))
+                if (entry.Index == Rom.Layout.VoiceBankAsset && Assets.TryGetData(Rom, entry, out var data))
                     return _voiceBank = data;
 
             return _voiceBank = Array.Empty<byte>();
@@ -240,8 +236,8 @@ public sealed class RomSession : IDisposable
         {
             if (_cartSounds is not null) return _cartSounds;
 
-            if (!TryGetCartAsset(SoundDirectory.SampleDirectoryAssetId, out var table, out _) ||
-                !TryGetCartAsset(SoundDirectory.SampleDataAssetId, out var data, out _))
+            if (!TryGetCartAsset(Rom.Layout.SampleDirectoryAsset, out var table, out _) ||
+                !TryGetCartAsset(Rom.Layout.SampleDataAsset, out var data, out _))
                 return _cartSounds = Sounds;
 
             return _cartSounds = SoundDirectory.ReadFrom(table, data);

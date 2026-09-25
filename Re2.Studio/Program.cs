@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.IO;
 using System.Linq;
 using System.Numerics;
@@ -93,6 +93,8 @@ public static class Program
             if (args[i] == "--menu") { int.TryParse(args[i + 1], out int m); MenuPanel.Pending = m; }
             if (args[i] == "--texture") { int.TryParse(args[i + 1], out int t); TexturePanel.PreselectAsset(t); }
             if (args[i] == "--text") { int.TryParse(args[i + 1], out int x); TextPanel.Preselect(x); }
+            if (args[i] == "--text-tab") TextTab.Show(args[i + 1]);
+            if (args[i] == "--second-language") InventoryLanguage.Prefer(args[i + 1] == "1");
             if (args[i] == "--clip") int.TryParse(args[i + 1], out _pinClip);
             if (args[i] == "--frame") int.TryParse(args[i + 1], out _pinFrame);
             if (args[i] == "--filter") _forceFilter = args[i + 1];
@@ -111,6 +113,7 @@ public static class Program
         foreach (string arg in args)
         {
             if (arg == "--play") _startPlayback = true;
+            if (arg == "--confirm-extract") ProjectPanel.AskBeforeExtract();
             if (arg == "--foregrounds") RoomPanel.ShowForegrounds = true;
             if (arg == "--modifier-probe") ModifierProbe.Enabled = true;
             if (arg == "--rest") _characterPanel.ForceRestPose = true;
@@ -166,7 +169,7 @@ public static class Program
     {
         _gl = _window.CreateOpenGL();
         _input = _window.CreateInput();
-        _imgui = new ImGuiController(_gl, _window, _input);
+        _imgui = new ImGuiController(_gl, _window, _input, JapaneseFont.Merge);
         RedirectImGuiSettings();
         _cache = new TextureCache(_gl);
         _viewport = new ModelViewport(_gl) { ShowJoints = _showJoints };
@@ -264,6 +267,7 @@ public static class Program
         VoicePanel.Invalidate();
         FmvPanel.Invalidate();
         TextPanel.Invalidate();
+        DocumentPagePanel.Invalidate();
         ItemNamePanel.Invalidate();
         ItemMessagePanel.Invalidate();
         MenuPanel.Invalidate();
@@ -283,6 +287,7 @@ public static class Program
             _cache.Dispose();
             _cache = new TextureCache(_gl);
             _session = new RomSession(path);
+            AssetLabels.Layout = _session.Rom.Layout;
             _romPath = path;
             // Plain ASCII: the em dash that used to sit here was stored mis-encoded and drew as "â€”".
             _status = $"{Path.GetFileName(path)} -- Resident Evil 2 {Re2Version.Detect(_session.Rom)} -- " +
@@ -291,7 +296,7 @@ public static class Program
             _settings.RememberRom(path);
 
             // Before any tab is drawn, so the import tabs know about an existing extract straight away.
-            ProjectPanel.Initialise(path, _settings);
+            ProjectPanel.Initialise(path, _settings, _session.Rom);
 
             // And so an edit made in a previous session is visible immediately rather than after a
             // trip to the Overrides tab.
@@ -400,7 +405,7 @@ public static class Program
             if (BeginTab("Sounds")) { SoundPanel.Draw(_session); ImGui.EndTabItem(); }
             if (BeginTab("Dialogue")) { VoicePanel.Draw(_session); ImGui.EndTabItem(); }
             if (BeginTab("FMV")) { FmvPanel.Draw(_session, _cache); ImGui.EndTabItem(); }
-            if (BeginTab("Text")) { TextTab.Draw(_session); ImGui.EndTabItem(); }
+            if (BeginTab("Text")) { TextTab.Draw(_session, _cache); ImGui.EndTabItem(); }
             if (BeginTab("Overrides")) { OverridePanel.Draw(_session); ImGui.EndTabItem(); }
             if (BeginTab("Assets")) { AssetPanel.Draw(_session); ImGui.EndTabItem(); }
             if (BeginTab("Project")) { ProjectPanel.Draw(_session); ImGui.EndTabItem(); }

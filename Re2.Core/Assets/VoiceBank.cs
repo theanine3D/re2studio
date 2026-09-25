@@ -25,6 +25,7 @@ public sealed record VoiceClip(
 /// <summary>The game's voice bank: the cutscene and event dialogue.</summary>
 public static class VoiceBank
 {
+    /// <summary>Rev 1's id; use <see cref="Re2Layout.VoiceBankAsset"/> for the ROM at hand.</summary>
     public const int AssetId = SoundDirectory.SequenceAssetId;
 
     public static readonly byte[] Magic = { (byte)'M', (byte)'O', (byte)'R', (byte)'T' };
@@ -37,7 +38,7 @@ public static class VoiceBank
     public static IReadOnlyList<VoiceClip> Read(RomFile rom, AssetDirectory directory)
     {
         foreach (var entry in directory.Entries)
-            if (entry.Index == AssetId && directory.TryGetData(rom, entry, out var data))
+            if (entry.Index == rom.Layout.VoiceBankAsset && directory.TryGetData(rom, entry, out var data))
                 return Read(data);
 
         return Array.Empty<VoiceClip>();
