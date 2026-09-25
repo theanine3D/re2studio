@@ -17,7 +17,7 @@
 #         re2 dump-code <rom> --out <dir>
 #
 # @category  RE2
-# @author    RE2Suite
+# @author    Theanine3D
 
 import json
 import os
