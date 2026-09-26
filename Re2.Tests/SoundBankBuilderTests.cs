@@ -91,4 +91,61 @@ public sealed class SoundBankBuilderTests
         Assert.False(s2.IsLooping);
         Assert.Equal(1000, (int)s2.DeclaredLength);
     }
+
+    /// <summary>Samples past the declared end, from the frames a sample actually stores.</summary>
+    private static int Tail(SoundSample s)
+        => SoundCodec.CapacityInSamples(s.StoredSize) - (int)s.DeclaredLength;
+
+    /// <summary>
+    /// Every retail sample stores 72-135 samples past its declared end, and the game needs them:
+    /// replaced samples cut off at the next frame boundary silenced every voice line.
+    /// </summary>
+    [RomFact]
+    public void ReplacedSamplesKeepRetailsTail()
+    {
+        var (bank, _, _) = Load();
+        Assert.All(bank.Samples, s => Assert.InRange(Tail(s), SoundBankBuilder.TailSamples, SoundBankBuilder.TailSamples + 63));
+
+        // One replacement for every length modulo a frame, so each rounding case is covered.
+        var victims = bank.Samples.Where(s => s.SampleRate > 0).Take(SoundCodec.SamplesPerFrame).ToList();
+        var replacements = victims.Select((s, k) => new SoundBankBuilder.Replacement(
+            s.Index, Enumerable.Range(0, 1000 + k).Select(i => (short)(i % 200 * 100)).ToArray(), s.SampleRate)).ToList();
+
+        var (table, data) = SoundBankBuilder.Rebuild(bank, replacements);
+        var rebuilt = SoundDirectory.ReadFrom(table, data);
+
+        Assert.All(rebuilt.Samples, s => Assert.InRange(Tail(s), SoundBankBuilder.TailSamples, SoundBankBuilder.TailSamples + 63));
+        Assert.All(victims, v => Assert.Equal(1000 + victims.IndexOf(v),
+                                              (int)rebuilt.Samples.First(s => s.Index == v.Index).DeclaredLength));
+    }
+
+    /// <summary>
+    /// A bank written without tails is repaired by Normalise, with the padding decoding to silence
+    /// and every other sample untouched; retail's own bank passes through unchanged.
+    /// </summary>
+    [RomFact]
+    public void NormaliseRepairsAMissingTailAndLeavesRetailAlone()
+    {
+        var (_, table, data) = Load();
+
+        var (sameTable, sameData) = SoundBankBuilder.Normalise(table, data);
+        Assert.Equal(table, sameTable);
+        Assert.Equal(data, sameData);
+
+        // The last sample runs to the end of the blob, so cutting the blob short strips its tail
+        // without touching the directory: the shape an unpadded import left behind.
+        var last = SoundDirectory.ReadFrom(table, data).Samples[^1];
+        int frames = ((int)last.DeclaredLength + SoundCodec.SamplesPerFrame - 1) / SoundCodec.SamplesPerFrame;
+        var cut = data[..(last.Offset + SoundCodec.BookBytes + frames * SoundCodec.FrameBytes)];
+        Assert.True(Tail(SoundDirectory.ReadFrom(table, cut).Samples[^1]) < SoundBankBuilder.TailSamples);
+
+        var (fixedTable, fixedData) = SoundBankBuilder.Normalise(table, cut);
+        var repaired = SoundDirectory.ReadFrom(fixedTable, fixedData);
+
+        Assert.InRange(Tail(repaired.Samples[^1]), SoundBankBuilder.TailSamples, SoundBankBuilder.TailSamples + 63);
+        Assert.Equal(data.AsSpan(0, last.Offset).ToArray(), fixedData.AsSpan(0, last.Offset).ToArray());
+
+        var pcm = SoundCodec.Decode(repaired.GetEncoded(repaired.Samples[^1]), 0);
+        Assert.All(pcm.Skip(frames * SoundCodec.SamplesPerFrame), x => Assert.Equal(0, x));
+    }
 }

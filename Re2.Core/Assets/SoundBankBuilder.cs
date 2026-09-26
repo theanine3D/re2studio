@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.Linq;
@@ -14,6 +14,37 @@ public static class SoundBankBuilder
 {
     /// <summary>New audio for one sample, as PCM at <paramref name="SampleRate"/>.</summary>
     public sealed record Replacement(int Index, short[] Pcm, int SampleRate);
+
+    /// <summary>
+    /// Samples every retail sample stores past its declared end: its frames always number
+    /// ceil((declared + 72) / 64), leaving 72-135 samples of tail. The game depends on it: replaced
+    /// samples that stopped at the next frame boundary left a ROM that played its sound effects but
+    /// no voice dialogue at all, and padding them to this rule (and nothing else) brought the voices
+    /// back on an emulator.
+    /// </summary>
+    public const int TailSamples = 72;
+
+    /// <summary>
+    /// Appends silent frames until the sample has retail's tail. An all-zero frame decodes to exact
+    /// silence (zero seeds, zero nibbles), so nothing needs re-encoding.
+    /// </summary>
+    public static byte[] PadTail(byte[] encoded, int declared)
+    {
+        int frames = (encoded.Length - SoundCodec.BookBytes) / SoundCodec.FrameBytes;
+        int needed = (declared + TailSamples + SoundCodec.SamplesPerFrame - 1) / SoundCodec.SamplesPerFrame;
+        if (frames >= needed) return encoded;
+
+        var padded = new byte[SoundCodec.BookBytes + needed * SoundCodec.FrameBytes];
+        encoded.CopyTo(padded, 0);
+        return padded;
+    }
+
+    /// <summary>
+    /// The same bank with every sample given retail's tail. Retail's own bank comes back unchanged;
+    /// one written before tails were padded comes back playable.
+    /// </summary>
+    public static (byte[] Directory, byte[] SampleData) Normalise(byte[] directory, byte[] sampleData)
+        => Rebuild(SoundDirectory.ReadFrom(directory, sampleData), Array.Empty<Replacement>());
 
     /// <summary>
     /// The highest rate any retail sample uses -- measured across all 1,192 of them, not assumed.
@@ -74,6 +105,8 @@ public static class SoundBankBuilder
                 rate = sample.SampleRate;
                 declared = (int)sample.DeclaredLength;
             }
+
+            encoded = PadTail(encoded, declared);
 
             data.AddRange(encoded);
             WriteRecord(table.AsSpan(i * SoundDirectory.RecordSize), sample.Index, offset, rate,

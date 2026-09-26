@@ -479,6 +479,36 @@ public static class ProjectFolder
     }
 
     /// <summary>Folds edited WAVs back into the two assets that hold the sample bank.</summary>
+    /// <summary>
+    /// The project's own bank files with tails padded, when either was edited; null otherwise, or
+    /// when padding changes nothing.
+    /// </summary>
+    private static Dictionary<int, byte[]>? NormalisedSoundBank(RomFile baseRom, string folder,
+                                                                ProjectManifest manifest)
+    {
+        var layout = baseRom.Layout;
+        var tableBlob = manifest.Blobs.FirstOrDefault(b => b.Ids.Contains(layout.SampleDirectoryAsset));
+        var dataBlob = manifest.Blobs.FirstOrDefault(b => b.Ids.Contains(layout.SampleDataAsset));
+        if (tableBlob is null || dataBlob is null) return null;
+
+        string tablePath = Path.Combine(folder, tableBlob.File.Replace('/', Path.DirectorySeparatorChar));
+        string dataPath = Path.Combine(folder, dataBlob.File.Replace('/', Path.DirectorySeparatorChar));
+        if (!File.Exists(tablePath) || !File.Exists(dataPath)) return null;
+
+        byte[] table = SharedFile.ReadAllBytes(tablePath);
+        byte[] data = SharedFile.ReadAllBytes(dataPath);
+        if (Hash(table) == tableBlob.Sha256 && Hash(data) == dataBlob.Sha256) return null;
+
+        var (newTable, newData) = SoundBankBuilder.Normalise(table, data);
+        if (newTable.AsSpan().SequenceEqual(table) && newData.AsSpan().SequenceEqual(data)) return null;
+
+        return new Dictionary<int, byte[]>
+        {
+            [layout.SampleDirectoryAsset] = newTable,
+            [layout.SampleDataAsset] = newData,
+        };
+    }
+
     public static Dictionary<int, byte[]> RebuiltSoundAssets(RomFile baseRom, string folder,
                                                              ProjectManifest manifest)
     {
@@ -567,6 +597,12 @@ public static class ProjectFolder
         // Edited WAVs are folded back into the bank before the blobs are laid out.
         var fromSound = RebuiltSoundAssets(baseRom, folder, manifest);
 
+        // A bank written into the project directly (the editor's Import does this) is laid out as
+        // it is, so it gets the same tail padding a rebuild applies. Banks written before the padding
+        // existed silenced every voice line in the game; this repairs them at build time.
+        if (fromSound.Count == 0 && NormalisedSoundBank(baseRom, folder, manifest) is { } normalised)
+            fromSound = normalised;
+
         var blobs = manifest.Blobs.OrderBy(b => b.OriginalOffset).ToList();
         var payloads = new List<(ProjectBlob Blob, byte[] Stored, int DeclaredSize)>(blobs.Count);
         int rebuilt = 0;
@@ -577,6 +613,11 @@ public static class ProjectFolder
             byte[] current = File.Exists(path) ? SharedFile.ReadAllBytes(path) : Array.Empty<byte>();
 
             bool forced = forceRebuild is not null && blob.Ids.Any(forceRebuild.Contains);
+
+            // The sound bank's edited blobs give way to their normalised form.
+            if (blob.Ids.FirstOrDefault(fromSound.ContainsKey) is var bankId && bankId != 0
+                && current.Length > 0 && Hash(current) != blob.Sha256)
+                current = fromSound[bankId];
 
             if (current.Length > 0 && (forced || Hash(current) != blob.Sha256))
             {

@@ -530,7 +530,18 @@ public static class AssetIo
 
     /// <summary>Replaces one sample in a project folder from a WAV.</summary>
     public static string ImportSound(RomSession session, string project, int sampleIndex, string wavPath)
+        => ImportSounds(session, project, new[] { sampleIndex }, wavPath);
+
+    /// <summary>
+    /// Replaces every listed sample with the same WAV, in one rebuild of the bank. Each copy is
+    /// brought to its own slot's rate, so the one file plays at the right pitch everywhere.
+    /// </summary>
+    public static string ImportSounds(RomSession session, string project, IReadOnlyList<int> sampleIndices,
+                                      string wavPath)
     {
+        var targets = sampleIndices.Distinct().ToList();
+        if (targets.Count == 0) throw new ArgumentException("No samples to import into.");
+
         // The project's own bank files are the truth. The session's view catches up only when a
         // background rescan finishes, so two imports in quick succession would otherwise both start
         // from the bank before either, and the second would write the first's sample back out.
@@ -539,42 +550,66 @@ public static class AssetIo
                    ReadProjectAsset(project, layout.SampleDataAsset) is { } onDiskData
             ? SoundDirectory.ReadFrom(onDiskTable, onDiskData)
             : session.Sounds;
-        var sample = bank.Samples.FirstOrDefault(s => s.Index == sampleIndex)
-                     ?? throw new InvalidDataException($"Sample {sampleIndex} is not in the bank.");
 
-        var cartSample = session.CartSounds.Samples.FirstOrDefault(s => s.Index == sampleIndex) ?? sample;
+        foreach (int index in targets)
+            if (bank.Samples.All(s => s.Index != index))
+                throw new InvalidDataException($"Sample {index} is not in the bank.");
 
         var (pcm, rate) = WavCodec.Read(File.ReadAllBytes(wavPath));
-        var replacements = new List<SoundBankBuilder.Replacement> { new(sampleIndex, pcm, rate) };
+        var replacements = targets.Select(i => new SoundBankBuilder.Replacement(i, pcm, rate)).ToList();
 
-        // WAVs edited by hand in the project and not yet folded into the bank go in with this one.
+        // WAVs edited by hand in the project and not yet folded into the bank go in with these.
         // Left pending, they would make the next scan and Build rebuild the bank from the cart plus
         // those WAVs alone, which throws away every sample brought in through Import.
-        var pending = PendingSoundWavs(project, sampleIndex);
+        var pending = PendingSoundWavs(project, targets.ToHashSet());
         replacements.AddRange(pending.Select(p => p.Replacement));
 
-        // Rebuilt from what the bank holds now, so other samples keep their edits, but the rate this
+        // Rebuilt from what the bank holds now, so other samples keep their edits, but the rate each
         // import is brought back to comes from the cart -- otherwise replacing an already-replaced
         // sample measures itself against the previous import and keeps its rate.
         var notes = new List<string>();
         var (table, data) = SoundBankBuilder.Rebuild(bank, replacements, notes.Add, session.CartSounds);
 
-        WriteProjectAsset(project, session.Rom.Layout.SampleDirectoryAsset, table);
-        string file = WriteProjectAsset(project, session.Rom.Layout.SampleDataAsset, data);
+        WriteProjectAsset(project, layout.SampleDirectoryAsset, table);
+        string file = WriteProjectAsset(project, layout.SampleDataAsset, data);
 
-        UpdateProjectWav(project, sampleIndex, wavPath);
+        UpdateProjectWavs(project, targets, wavPath);
         MarkSoundWavsApplied(project, pending.Select(p => p.Index));
 
         // What the bank now holds, rather than what the WAV was: the two differ whenever the audio
         // had to be resampled, and the stored rate is the one that decides how it plays.
-        var stored = SoundDirectory.ReadFrom(table, data).Samples.First(s => s.Index == sampleIndex);
-
+        var rebuilt = SoundDirectory.ReadFrom(table, data);
         double seconds = rate > 0 ? pcm.Length / (double)rate : 0;
-        return $"sample {sampleIndex}: {stored.DeclaredLength:N0} samples at {stored.SampleRate} Hz " +
-               $"({stored.Seconds:0.00}s), was {sample.Seconds:0.00}s at {sample.SampleRate} Hz " +
-               $"(the ROM's own: {cartSample.Seconds:0.00}s at {cartSample.SampleRate} Hz); " +
-               $"source WAV {pcm.Length:N0} samples at {rate} Hz ({seconds:0.00}s)\n" +
-               string.Concat(notes.Select(n => n + "\n")) +
+        string source = $"source WAV {pcm.Length:N0} samples at {rate} Hz ({seconds:0.00}s)";
+
+        string body;
+        if (targets.Count == 1)
+        {
+            int index = targets[0];
+            var sample = bank.Samples.First(s => s.Index == index);
+            var cartSample = session.CartSounds.Samples.FirstOrDefault(s => s.Index == index) ?? sample;
+            var stored = rebuilt.Samples.First(s => s.Index == index);
+            body = $"sample {index}: {stored.DeclaredLength:N0} samples at {stored.SampleRate} Hz " +
+                   $"({stored.Seconds:0.00}s), was {sample.Seconds:0.00}s at {sample.SampleRate} Hz " +
+                   $"(the ROM's own: {cartSample.Seconds:0.00}s at {cartSample.SampleRate} Hz); {source}\n" +
+                   string.Concat(notes.Select(n => n + "\n"));
+        }
+        else
+        {
+            // One line per rate rather than per sample: a long selection would otherwise bury the
+            // outcome under dozens of near-identical resampling notes.
+            var byRate = rebuilt.Samples.Where(s => targets.Contains(s.Index))
+                .GroupBy(s => s.SampleRate).OrderBy(g => g.Key)
+                .Select(g => $"  {g.Count()} at {g.Key:N0} Hz ({g.First().Seconds:0.00}s): " +
+                             string.Join(", ", g.Select(s => s.Index)));
+            long grew = (long)data.Length - bank.SampleData.Length;
+            body = $"{targets.Count} samples replaced with the same audio; {source}\n" +
+                   string.Concat(byRate.Select(l => l + "\n")) +
+                   $"sample data {(grew >= 0 ? "grew" : "shrank")} by {Math.Abs(grew):N0} bytes " +
+                   $"to {data.Length:N0}\n";
+        }
+
+        return body +
                (pending.Count > 0
                    ? $"also folded in {pending.Count} WAV(s) edited in the project folder: " +
                      string.Join(", ", pending.Select(p => p.Index)) + "\n"
@@ -584,7 +619,7 @@ public static class AssetIo
 
     /// <summary>Project WAVs whose contents no longer match the hash the manifest recorded.</summary>
     private static List<(int Index, SoundBankBuilder.Replacement Replacement)> PendingSoundWavs(
-        string project, int except)
+        string project, IReadOnlySet<int> except)
     {
         var result = new List<(int, SoundBankBuilder.Replacement)>();
         try
@@ -595,7 +630,7 @@ public static class AssetIo
 
             foreach (var sample in manifest.SoundSamples)
             {
-                if (sample.Index == except) continue;
+                if (except.Contains(sample.Index)) continue;
                 string path = Path.Combine(project, sample.File.Replace('/', Path.DirectorySeparatorChar));
                 if (!File.Exists(path)) continue;
 
@@ -650,25 +685,27 @@ public static class AssetIo
     }
 
     /// <summary>
-    /// Copies the imported audio over the project's own WAV for that sample, and re-records its hash
-    /// so the rebuild treats it as already applied rather than as a fresh edit.
+    /// Copies the imported audio over the project's own WAV for each sample, and re-records their
+    /// hashes so the rebuild treats them as already applied rather than as fresh edits.
     /// </summary>
-    private static void UpdateProjectWav(string project, int sampleIndex, string wavPath)
+    private static void UpdateProjectWavs(string project, IReadOnlyCollection<int> sampleIndices, string wavPath)
     {
         try
         {
             string manifestPath = Path.Combine(project, ProjectFolder.ManifestName);
             var manifest = JsonSerializer.Deserialize<ProjectManifest>(SharedFile.ReadAllText(manifestPath));
-            var entry = manifest?.SoundSamples.FirstOrDefault(s => s.Index == sampleIndex);
-            if (manifest is null || entry is null) return;
+            if (manifest is null) return;
 
             byte[] wav = File.ReadAllBytes(wavPath);
-            string target = Path.Combine(project, entry.File.Replace('/', Path.DirectorySeparatorChar));
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.WriteAllBytes(target, wav);
+            string hash = System.Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(wav));
 
-            entry.Sha256 = System.Convert.ToHexString(
-                System.Security.Cryptography.SHA256.HashData(wav));
+            foreach (var entry in manifest.SoundSamples.Where(s => sampleIndices.Contains(s.Index)))
+            {
+                string target = Path.Combine(project, entry.File.Replace('/', Path.DirectorySeparatorChar));
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                File.WriteAllBytes(target, wav);
+                entry.Sha256 = hash;
+            }
 
             File.WriteAllText(manifestPath,
                 JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true }));

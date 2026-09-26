@@ -134,6 +134,83 @@ public sealed class SoundImportOverrideTests
         }
     }
 
+    /// <summary>
+    /// One WAV into several samples of different rates: each lands at its own slot's rate with the
+    /// new audio, and every sample outside the selection keeps the cart's.
+    /// </summary>
+    [RomFact]
+    public void OneWavIntoManySamples()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "re2-sound-" + Guid.NewGuid().ToString("N")[..8]);
+        string wav = Path.Combine(Path.GetTempPath(), "re2-tone-" + Guid.NewGuid().ToString("N")[..8] + ".wav");
+
+        try
+        {
+            Re2.Core.Project.ProjectFolder.Extract(TestRom.Rom, folder);
+            File.WriteAllBytes(wav, Wav(22050, 0.3));
+
+            using var session = new RomSession(TestRom.Path!);
+            var cart = session.CartSounds;
+            int[] targets = cart.Samples.GroupBy(s => s.SampleRate).Take(4).Select(g => g.First().Index).ToArray();
+            Assert.Equal(4, targets.Length);
+
+            string log = AssetIo.ImportSounds(session, folder, targets, wav);
+            Assert.Contains("4 samples replaced", log);
+
+            AssertAllReplaced(session, folder, targets);
+
+            foreach (var now in session.Sounds.Samples)
+            {
+                var was = cart.Samples.First(s => s.Index == now.Index);
+                Assert.Equal(was.SampleRate, now.SampleRate);
+                if (!targets.Contains(now.Index))
+                    Assert.True(session.Sounds.GetEncoded(now).SequenceEqual(cart.GetEncoded(was)),
+                                $"sample {now.Index} changed although it was not selected");
+            }
+        }
+        finally
+        {
+            try { if (Directory.Exists(folder)) Directory.Delete(folder, true); } catch (IOException) { }
+            try { if (File.Exists(wav)) File.Delete(wav); } catch (IOException) { }
+        }
+    }
+
+    /// <summary>
+    /// A project holding a bank written before tails were padded (the shape that silenced every
+    /// voice line) builds into a ROM whose bank has retail's tail on every sample.
+    /// </summary>
+    [RomFact]
+    public void BuildRepairsABankWithoutTails()
+    {
+        string folder = Path.Combine(Path.GetTempPath(), "re2-sound-" + Guid.NewGuid().ToString("N")[..8]);
+        try
+        {
+            Re2.Core.Project.ProjectFolder.Extract(TestRom.Rom, folder);
+
+            string dataFile = Path.Combine(folder, "assets", "sounds", "sample-data.bin");
+            string tableFile = Path.Combine(folder, "assets", "sounds", "sample-directory.bin");
+            byte[] table = File.ReadAllBytes(tableFile), data = File.ReadAllBytes(dataFile);
+
+            var last = SoundDirectory.ReadFrom(table, data).Samples[^1];
+            int frames = ((int)last.DeclaredLength + Re2.Core.Formats.SoundCodec.SamplesPerFrame - 1)
+                         / Re2.Core.Formats.SoundCodec.SamplesPerFrame;
+            File.WriteAllBytes(dataFile, data[..(last.Offset + Re2.Core.Formats.SoundCodec.BookBytes
+                                                 + frames * Re2.Core.Formats.SoundCodec.FrameBytes)]);
+
+            var output = Re2.Core.Rom.RomFile.Load(TestRom.Path!);
+            Re2.Core.Project.ProjectFolder.Build(TestRom.Rom, folder, output);
+
+            var built = SoundDirectory.Read(output, AssetDirectory.Read(output));
+            Assert.All(built.Samples, s => Assert.InRange(
+                Re2.Core.Formats.SoundCodec.CapacityInSamples(s.StoredSize) - (int)s.DeclaredLength,
+                SoundBankBuilder.TailSamples, SoundBankBuilder.TailSamples + 63));
+        }
+        finally
+        {
+            try { if (Directory.Exists(folder)) Directory.Delete(folder, true); } catch (IOException) { }
+        }
+    }
+
     /// <summary>After a rescan, each target plays something other than the cart's audio.</summary>
     private static void AssertAllReplaced(RomSession session, string folder, int[] targets)
     {

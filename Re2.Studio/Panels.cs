@@ -1170,6 +1170,26 @@ public static class SoundPanel
                 _pcm = null;
                 _wav = null;
             }
+
+            // One WAV into the whole selection, as one rebuild of the bank: replacing a family of
+            // samples (every footstep, say) one at a time would otherwise mean a pass per sample.
+            if (_selection.IsMultiple)
+            {
+                ImGui.SameLine();
+                var targets = _selection.ToAssetIds(i => sound.Samples[i].Index);
+                if (ImGui.Button($"Import into {targets.Count} selected samples"))
+                {
+                    _importStatus = PanelIo.Run(() =>
+                        AssetIo.ImportSounds(session, ProjectPanel.Folder, targets, _importPath));
+
+                    session.Overrides.Scan(ProjectPanel.Folder, session.Rom);
+                    _pcm = null;
+                    _wav = null;
+                }
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                    ImGui.SetTooltip("Replaces every selected sample with this WAV. Each copy is " +
+                                     "resampled to its own slot's rate.");
+            }
             ImGui.EndDisabled();
 
             ImGui.TextDisabled("16-bit PCM WAV. The project's own WAVs under " +
