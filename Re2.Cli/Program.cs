@@ -12,6 +12,7 @@ using Re2.Core.Import;
 using Re2.Core.Patch;
 using Re2.Core.Project;
 using Re2.Core.Rom;
+using Re2.Core.Save;
 
 namespace Re2.Cli;
 
@@ -71,6 +72,7 @@ public static class Program
                 "anim-import" => CmdAnimImport(args),
                 "extract" => CmdExtract(args),
                 "build" => CmdBuild(args),
+                "save-convert" => CmdSaveConvert(args),
                 "help" or "--help" or "-h" => Usage(),
                 _ => Fail($"Unknown command '{args[0]}'.")
             };
@@ -119,6 +121,9 @@ public static class Program
               re2 bg dump <rom> --out <dir>       Write every background out as .jpg
               re2 bg export <rom> --out <dir>     Decode backgrounds to PNG
               re2 bg replace <rom> --index N --image f.png --out new.z64
+              re2 save-convert <save.sra> --from p64|mupen --to p64|mupen [--out new.sra]
+                                                  Convert an RE2 save between Project64 and
+                                                  Mupen64 layouts; writes a new file
             """);
         return 0;
     }
@@ -1872,6 +1877,28 @@ public static class Program
         Console.WriteLine($"wrote {outPath} ({result.Target.Length:N0} bytes)");
         return 0;
     }
+
+    /// <summary>Converts an emulator save between Project64 and Mupen64 layouts.</summary>
+    private static int CmdSaveConvert(string[] args)
+    {
+        string input = RequireArg(args, 1, "save");
+
+        var from = ParseFormat(Option(args, "--from") ?? throw new ArgumentException("Missing --from (p64 or mupen)."));
+        var to = ParseFormat(Option(args, "--to") ?? throw new ArgumentException("Missing --to (p64 or mupen)."));
+
+        string? outPath = Option(args, "--out");
+        var result = N64SaveConverter.ConvertFile(input, from, to, outPath);
+
+        Console.WriteLine(result.Log);
+        return 0;
+    }
+
+    private static EmulatorFormat ParseFormat(string value) => value.ToLowerInvariant() switch
+    {
+        "p64" or "project64" => EmulatorFormat.Project64,
+        "mupen" or "mupen64" or "rmg" => EmulatorFormat.Mupen64,
+        _ => throw new ArgumentException($"Unknown emulator '{value}' (expected p64 or mupen)."),
+    };
 
     /// <summary>How many distinct rooms place each scenery model.</summary>
     private static int CmdPropRooms(string[] args)

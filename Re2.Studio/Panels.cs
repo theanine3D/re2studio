@@ -11,6 +11,7 @@ using Re2.Core.Formats;
 using Re2.Core.Patch;
 using Re2.Core.Project;
 using Re2.Core.Rom;
+using Re2.Core.Save;
 
 namespace Re2.Studio;
 
@@ -2046,6 +2047,7 @@ public static class ProjectPanel
         }
 
         DrawPatcher();
+        DrawSaves();
     }
 
     private static string _patchFile = "";
@@ -2131,6 +2133,71 @@ public static class ProjectPanel
         {
             ImGui.Separator();
             ImGui.TextWrapped(_patchLog);
+        }
+    }
+
+    private static string _saveInput = "";
+    private static int _saveDirection;           // 0: Project64 -> Mupen64, 1: Mupen64 -> Project64
+    private static string _saveLog = "";
+
+    /// <summary>Converts an RE2 in-game save between Project64 and Mupen64 layouts.</summary>
+    private static void DrawSaves()
+    {
+        ImGui.Separator();
+        // Collapsed on every launch: moving a save between emulators is an occasional errand.
+        if (!ImGui.CollapsingHeader("Saves")) return;
+
+        ImGui.TextWrapped(
+            "Converts a save (.sra) between Project64 and Mupen64 formats. Useful for " +
+            "testing and debugging your hack in different emulators.");
+
+        ImGui.SetNextItemWidth(560);
+        ImGui.InputText("save file", ref _saveInput, 512);
+        ImGui.SameLine();
+        if (ImGui.Button("Choose...##save"))
+        {
+            string? picked = NativeDialogs.OpenFile("Choose an emulator save",
+                "N64 SRAM saves\0*.sra\0All files\0*.*\0");
+            if (picked is not null) _saveInput = picked;
+        }
+
+        bool fromP64 = _saveDirection == 0;
+        ImGui.SetNextItemWidth(280);
+        ImGui.Combo("convert", ref _saveDirection,
+                    new[] { "Project64 -> Mupen64", "Mupen64 -> Project64" }, 2);
+
+        bool ready = _saveInput.Length > 0 && File.Exists(_saveInput);
+
+        ImGui.BeginDisabled(!ready || Busy);
+
+        if (ImGui.Button("Convert Save"))
+        {
+            _saveLog = "";
+            string input = _saveInput;
+            var from = fromP64 ? EmulatorFormat.Project64 : EmulatorFormat.Mupen64;
+            var to = fromP64 ? EmulatorFormat.Mupen64 : EmulatorFormat.Project64;
+
+            // The result is written beside the chosen save, under a new name, so the original is
+            // never touched. No output path is asked for.
+            _work = Task.Run(() =>
+            {
+                try { _saveLog = N64SaveConverter.ConvertFile(input, from, to).Log; }
+                catch (Exception ex) { _saveLog = "convert failed: " + ex.Message; }
+            });
+        }
+
+        ImGui.EndDisabled();
+
+        if (!ready)
+        {
+            ImGui.SameLine();
+            ImGui.TextDisabled("(choose a save file to convert)");
+        }
+
+        if (_saveLog.Length > 0)
+        {
+            ImGui.Separator();
+            ImGui.TextUnformatted(_saveLog);
         }
     }
 }
